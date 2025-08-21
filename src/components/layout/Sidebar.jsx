@@ -20,7 +20,7 @@ const Sidebar = () => {
   const location = useLocation();
   const { signOut } = useAuth();
   const { toast } = useToast();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const menuItems = [
