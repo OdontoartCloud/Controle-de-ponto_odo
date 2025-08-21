@@ -1,0 +1,6 @@
+## Pages
+- [Configurações - Controle de Ponto](/configuracoes): Configure regras de tolerância e cores de status para o sistema de controle de ponto.
+- [Dashboard - Controle de Ponto](/dashboard): Dashboard principal do sistema de controle de ponto com métricas e atividades recentes.
+- [Login - Controle de Ponto](/login): Faça login no sistema de controle de ponto para gerenciar registros e usuários.
+- [Registros - Controle de Ponto](/registros): Visualize e gerencie registros de ponto, faça upload de arquivos XLSX e baixe relatórios.
+- [Usuários - Controle de Ponto](/usuarios): Gerencie usuários do sistema de controle de ponto, adicione novos usuários e configure permissões.
