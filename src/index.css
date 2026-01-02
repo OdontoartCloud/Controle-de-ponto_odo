@@ -4,6 +4,7 @@
 @tailwind utilities;
 
 :root {
+  --sidebar-width: 4rem;
   --background: 0 0% 100%;
   --foreground: 222.2 84% 4.9%;
   --card: 0 0% 100%;
@@ -82,11 +83,11 @@ body {
 
 @layer components {
   .sidebar-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors duration-200 cursor-pointer;
+    @apply flex w-full items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors duration-200 cursor-pointer dark:text-gray-200 dark:hover:bg-gray-800 dark:hover:text-white;
   }
   
   .sidebar-item.active {
-    @apply bg-primary-100 text-primary-700 font-medium;
+    @apply bg-primary-100 text-primary-700 font-medium dark:bg-gray-800 dark:text-white;
   }
 
   /* Responsive table improvements */
@@ -111,4 +112,46 @@ body {
     background-color: rgba(0, 0, 0, 0.5);
     z-index: 40;
   }
+}
+
+.dark .text-gray-900 {
+  color: #f9fafb;
+}
+
+.dark .text-gray-800 {
+  color: #f3f4f6;
+}
+
+.dark .text-gray-700 {
+  color: #e5e7eb;
+}
+
+.dark .text-gray-600 {
+  color: #d1d5db;
+}
+
+.dark .text-gray-500 {
+  color: #9ca3af;
+}
+
+.dark .bg-white {
+  background-color: #0f172a;
+}
+
+.dark .bg-gray-50 {
+  background-color: #0f172a;
+}
+
+.dark .bg-gray-100 {
+  background-color: #111827;
+}
+
+.dark .bg-gray-200 {
+  background-color: #1f2937;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: #1f2937;
 }
