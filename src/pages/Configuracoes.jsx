@@ -9,7 +9,6 @@ import {
   Palette,
   Timer,
   AlertTriangle,
-  CheckCircle,
   Wrench
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
@@ -22,18 +21,42 @@ import { StatusColors, TimeRecordStatus } from '@/types';
 
 const Configuracoes = () => {
   const initialTimeSettings = {
-    toleranceMinutes: 5, // Tolerância geral em minutos
+    [TimeRecordStatus.ON_TIME]: 5,
+    [TimeRecordStatus.LATE]: 5,
+    [TimeRecordStatus.EARLY]: 5,
+    [TimeRecordStatus.ADJUSTED]: 5
   };
   
   const [timeSettings, setTimeSettings] = useState(initialTimeSettings);
   const [statusColors, setStatusColors] = useState(StatusColors);
   const { toast } = useToast();
 
+  const normalizeTimeSettings = (settings = {}) => {
+    const baseTolerance = Number.isFinite(settings?.toleranceMinutes)
+      ? settings.toleranceMinutes
+      : 5;
+
+    return {
+      [TimeRecordStatus.ON_TIME]: Number.isFinite(settings?.[TimeRecordStatus.ON_TIME])
+        ? settings[TimeRecordStatus.ON_TIME]
+        : baseTolerance,
+      [TimeRecordStatus.LATE]: Number.isFinite(settings?.[TimeRecordStatus.LATE])
+        ? settings[TimeRecordStatus.LATE]
+        : baseTolerance,
+      [TimeRecordStatus.EARLY]: Number.isFinite(settings?.[TimeRecordStatus.EARLY])
+        ? settings[TimeRecordStatus.EARLY]
+        : baseTolerance,
+      [TimeRecordStatus.ADJUSTED]: Number.isFinite(settings?.[TimeRecordStatus.ADJUSTED])
+        ? settings[TimeRecordStatus.ADJUSTED]
+        : baseTolerance
+    };
+  };
+
   useEffect(() => {
     const savedConfig = localStorage.getItem('timeControlConfig');
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
-      if (config.timeSettings) setTimeSettings(config.timeSettings);
+      if (config.timeSettings) setTimeSettings(normalizeTimeSettings(config.timeSettings));
       if (config.statusColors) setStatusColors(config.statusColors);
     }
   }, []);
@@ -54,9 +77,10 @@ const Configuracoes = () => {
     const numValue = parseInt(value, 10);
     if (isNaN(numValue) || numValue < 0) return;
 
-    setTimeSettings({
-      toleranceMinutes: numValue
-    });
+    setTimeSettings((prev) => ({
+      ...prev,
+      [status]: numValue
+    }));
   };
   
   const handleSave = () => {
@@ -88,36 +112,46 @@ const Configuracoes = () => {
   };
 
   const toleranceOptions = Array.from({ length: 61 }, (_, i) => i); // 0 to 60 minutes
+  const onTimeTolerance = timeSettings?.[TimeRecordStatus.ON_TIME] ?? 5;
+  const lateTolerance = timeSettings?.[TimeRecordStatus.LATE] ?? 5;
+  const earlyTolerance = timeSettings?.[TimeRecordStatus.EARLY] ?? 5;
+  const adjustedTolerance = timeSettings?.[TimeRecordStatus.ADJUSTED] ?? 5;
 
-  const TimeSettingInput = ({ label, icon: Icon, description }) => (
-    <div className="p-4 bg-gray-50 rounded-lg">
-      <div className="flex items-center gap-3 mb-3">
-        <Icon className="w-5 h-5 text-gray-600" />
-        <h4 className="font-medium text-gray-900">{label}</h4>
+  const TimeSettingInput = ({ label, icon: Icon, description, statusKey }) => {
+    const selectedValue = Number.isFinite(timeSettings?.[statusKey])
+      ? timeSettings[statusKey]
+      : 5;
+
+    return (
+      <div className="p-4 bg-gray-50 rounded-lg dark:bg-gray-900 dark:border dark:border-gray-800">
+        <div className="flex items-center gap-3 mb-3">
+          <Icon className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+          <h4 className="font-medium text-gray-900 dark:text-gray-100">{label}</h4>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`tolerance-${statusKey}`} className="text-sm text-gray-700 dark:text-gray-200">Tolerância (minutos)</Label>
+          <Select 
+              value={String(selectedValue)}
+              onValueChange={(value) => handleTimeChange(statusKey, value)}
+          >
+            <SelectTrigger id={`tolerance-${statusKey}`}>
+              <SelectValue placeholder="Selecione os minutos..." />
+            </SelectTrigger>
+            <SelectContent>
+              {toleranceOptions.map(min => (
+                <SelectItem key={min} value={String(min)}>{min} min</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-xs text-gray-500 mt-2 dark:text-gray-400">{description}</p>
       </div>
-      <div className="space-y-1">
-        <Label htmlFor="tolerance" className="text-sm">Tolerância (minutos)</Label>
-        <Select 
-            value={String(timeSettings.toleranceMinutes)}
-            onValueChange={(value) => handleTimeChange('tolerance', value)}
-        >
-          <SelectTrigger id="tolerance">
-            <SelectValue placeholder="Selecione os minutos..." />
-          </SelectTrigger>
-          <SelectContent>
-            {toleranceOptions.map(min => (
-              <SelectItem key={min} value={String(min)}>{min} min</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <p className="text-xs text-gray-500 mt-2">{description}</p>
-    </div>
-  );
+    );
+  };
 
   const ColorPicker = ({ status, currentColor, label }) => (
     <div className="space-y-2">
-      <Label className="text-sm font-medium text-gray-700">{label}</Label>
+      <Label className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</Label>
       <Select value={currentColor} onValueChange={(color) => handleColorChange(status, color)}>
         <SelectTrigger>
           <SelectValue>
@@ -161,8 +195,8 @@ const Configuracoes = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <h1 className="text-3xl font-bold text-gray-900">Configurações</h1>
-            <p className="text-gray-600 mt-2">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Configurações</h1>
+            <p className="text-gray-600 mt-2 dark:text-gray-400">
               Ajuste as regras de tolerância de tempo e a aparência do sistema.
             </p>
           </motion.div>
@@ -185,18 +219,37 @@ const Configuracoes = () => {
                 </CardHeader>
                 <CardContent className="space-y-4 sm:space-y-6">
                   <TimeSettingInput 
-                    label="Tolerância Geral" 
+                    label="Tolerância de No Horário" 
                     icon={Clock}
-                    description="Tolerância em minutos para entrada e saída. Registros dentro desta margem são considerados 'No Horário'."
+                    description="Margem em minutos para considerar o registro dentro do horário."
+                    statusKey={TimeRecordStatus.ON_TIME}
+                  />
+                  <TimeSettingInput 
+                    label="Tolerância de Atraso" 
+                    icon={AlertTriangle}
+                    description="Minutos após o horário previsto para considerar o registro atrasado."
+                    statusKey={TimeRecordStatus.LATE}
+                  />
+                  <TimeSettingInput 
+                    label="Tolerância de Antecipação" 
+                    icon={Timer}
+                    description="Minutos antes do horário previsto para considerar o registro antecipado."
+                    statusKey={TimeRecordStatus.EARLY}
+                  />
+                  <TimeSettingInput 
+                    label="Tolerância de Ajuste" 
+                    icon={Wrench}
+                    description="Valor de referência para registros ajustados manualmente."
+                    statusKey={TimeRecordStatus.ADJUSTED}
                   />
                   
-                  <div className="p-4 bg-blue-50 rounded-lg">
-                    <h4 className="font-medium text-blue-900 mb-2">Como funciona:</h4>
-                    <ul className="text-sm text-blue-800 space-y-1">
-                      <li>• <strong>No Horário:</strong> Dentro da tolerância definida</li>
-                      <li>• <strong>Atrasado:</strong> Mais de {timeSettings.toleranceMinutes} min após o horário</li>
-                      <li>• <strong>Antecipado:</strong> Mais de {timeSettings.toleranceMinutes} min antes do horário</li>
-                      <li>• <strong>Ajustado:</strong> Registros marcados com * (ajuste manual)</li>
+                  <div className="p-4 bg-blue-50 rounded-lg dark:bg-gray-900 dark:border dark:border-gray-800">
+                    <h4 className="font-medium text-blue-900 mb-2 dark:text-gray-100">Como funciona:</h4>
+                    <ul className="text-sm text-blue-800 space-y-1 dark:text-gray-200">
+                      <li>• <strong>No Horário:</strong> Até {onTimeTolerance} min de diferença do horário</li>
+                      <li>• <strong>Atrasado:</strong> Mais de {lateTolerance} min após o horário</li>
+                      <li>• <strong>Antecipado:</strong> Mais de {earlyTolerance} min antes do horário</li>
+                      <li>• <strong>Ajustado:</strong> Registros marcados com * (referência: {adjustedTolerance} min)</li>
                     </ul>
                   </div>
                 </CardContent>
@@ -224,13 +277,13 @@ const Configuracoes = () => {
                   <ColorPicker status={TimeRecordStatus.EARLY} currentColor={statusColors[TimeRecordStatus.EARLY]} label="Antecipado" />
                   <ColorPicker status={TimeRecordStatus.ADJUSTED} currentColor={statusColors[TimeRecordStatus.ADJUSTED]} label="Ajustado" />
 
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <h4 className="font-medium text-gray-900 mb-3">Prévia das cores:</h4>
+                  <div className="p-4 bg-gray-50 rounded-lg dark:bg-gray-900 dark:border dark:border-gray-800">
+                    <h4 className="font-medium text-gray-900 mb-3 dark:text-gray-100">Prévia das cores:</h4>
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(statusColors).map(([status, color]) => (
                         <div key={status} className="flex items-center gap-2">
                           <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: color }} />
-                          <span className="text-xs text-gray-600">
+                          <span className="text-xs text-gray-600 dark:text-gray-300">
                             {status === TimeRecordStatus.ON_TIME ? 'No horário' : 
                              status === TimeRecordStatus.LATE ? 'Atrasado' :
                              status === TimeRecordStatus.EARLY ? 'Antecipado' : 'Ajustado'}

@@ -79,10 +79,33 @@ const Registros = () => {
     }
   ]);
   const [hasDateFilter, setHasDateFilter] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const { user } = useAuth();
+
+  const normalizeTimeSettings = (settings = {}) => {
+    const baseTolerance = Number.isFinite(settings?.toleranceMinutes)
+      ? settings.toleranceMinutes
+      : 5;
+
+    return {
+      [TimeRecordStatus.ON_TIME]: Number.isFinite(settings?.[TimeRecordStatus.ON_TIME])
+        ? settings[TimeRecordStatus.ON_TIME]
+        : baseTolerance,
+      [TimeRecordStatus.LATE]: Number.isFinite(settings?.[TimeRecordStatus.LATE])
+        ? settings[TimeRecordStatus.LATE]
+        : baseTolerance,
+      [TimeRecordStatus.EARLY]: Number.isFinite(settings?.[TimeRecordStatus.EARLY])
+        ? settings[TimeRecordStatus.EARLY]
+        : baseTolerance,
+      [TimeRecordStatus.ADJUSTED]: Number.isFinite(settings?.[TimeRecordStatus.ADJUSTED])
+        ? settings[TimeRecordStatus.ADJUSTED]
+        : baseTolerance,
+    };
+  };
 
   // Carregar registros do Supabase
   const loadRecordsFromSupabase = async () => {
@@ -110,18 +133,13 @@ const Registros = () => {
   // Carregar configurações e registros salvos
   useEffect(() => {
     const savedConfig = localStorage.getItem('timeControlConfig');
+    let normalizedSettings = normalizeTimeSettings();
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
-      if (config.timeSettings) setTimeSettings(config.timeSettings);
+      normalizedSettings = normalizeTimeSettings(config?.timeSettings);
       if (config.statusColors) setStatusColors(config.statusColors);
-    } else {
-      setTimeSettings({
-        toleranceMinutes: 5,
-        [TimeRecordStatus.ON_TIME]: 5,
-        [TimeRecordStatus.LATE]: 5,
-        [TimeRecordStatus.EARLY]: 5,
-      });
     }
+    setTimeSettings(normalizedSettings);
 
     // Carregar registros salvos
     const savedRecords = localStorage.getItem('timeControlRecords');
@@ -198,7 +216,24 @@ const Registros = () => {
     }
 
     setFilteredRecords(recordsToFilter);
+    setCurrentPage(1);
   }, [searchTerm, allRecords, activeFilters, nameFilter, departmentFilter, dateRange, hasDateFilter]);
+
+  useEffect(() => {
+    const nextTotalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+    if (currentPage > nextTotalPages) {
+      setCurrentPage(nextTotalPages);
+    }
+  }, [filteredRecords.length, pageSize, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const pageSizeOptions = [50, 100, 150, 200];
+  const paginatedRecords = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredRecords.slice(startIndex, startIndex + pageSize);
+  }, [filteredRecords, currentPage, pageSize]);
+  const pageStart = filteredRecords.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const pageEnd = Math.min(filteredRecords.length, currentPage * pageSize);
 
   const getStatusColor = (status) => {
     const color = statusColors[status] || '#a1a1aa';
@@ -347,15 +382,29 @@ const Registros = () => {
     if (!contractualTime || !actualTime) return null;
 
     const diffMinutes = (actualTime - contractualTime) / (1000 * 60);
-    const tolerance = timeSettings?.toleranceMinutes || 5;
+    const fallbackTolerance = Number.isFinite(timeSettings?.toleranceMinutes)
+      ? timeSettings.toleranceMinutes
+      : 5;
+    const onTimeTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.ON_TIME])
+      ? timeSettings[TimeRecordStatus.ON_TIME]
+      : fallbackTolerance;
+    const lateTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.LATE])
+      ? timeSettings[TimeRecordStatus.LATE]
+      : onTimeTolerance;
+    const earlyTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.EARLY])
+      ? timeSettings[TimeRecordStatus.EARLY]
+      : onTimeTolerance;
 
-    if (diffMinutes > tolerance) {
+    if (diffMinutes > lateTolerance) {
       return TimeRecordStatus.LATE;
-    } else if (diffMinutes < -tolerance) {
+    }
+    if (diffMinutes < -earlyTolerance) {
       return TimeRecordStatus.EARLY;
-    } else {
+    }
+    if (Math.abs(diffMinutes) <= onTimeTolerance) {
       return TimeRecordStatus.ON_TIME;
     }
+    return diffMinutes > 0 ? TimeRecordStatus.LATE : TimeRecordStatus.EARLY;
   };
 
   const handleFileChange = (event) => {
@@ -1189,6 +1238,55 @@ const Registros = () => {
                     </div>
                   )}
                 </CardTitle>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="page-size" className="text-sm text-gray-600">Registros por página</Label>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(value) => {
+                        const nextSize = parseInt(value, 10);
+                        if (!isNaN(nextSize)) {
+                          setPageSize(nextSize);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="page-size" className="w-[80px]">
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pageSizeOptions.map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      Mostrando {pageStart}-{pageEnd} de {filteredRecords.length}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Próxima
+                    </Button>
+                    <span className="text-sm text-gray-500">
+                      Página {currentPage} de {totalPages}
+                    </span>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto -mx-6 sm:mx-0">
@@ -1220,13 +1318,13 @@ const Registros = () => {
                     </thead>
                     <tbody>
                       {filteredRecords.length > 0 ? (
-                        filteredRecords.map((record, index) => (
+                        paginatedRecords.map((record, index) => (
                           <motion.tr
                             key={record.id}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ duration: 0.3, delay: index * 0.02 }}
-                            className="border-b border-gray-100 hover:bg-gray-50"
+                            className="border-b border-gray-100 hover:bg-gray-50 dark:hover:bg-gray-900"
                           >
                             <td className="py-4 px-4">
                               <div>
