@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+ï»¿import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import {
@@ -17,7 +17,7 @@ import { TimeRecordStatus } from '@/types';
 
 const STATUS_META = {
   [TimeRecordStatus.ON_TIME]: {
-    label: 'No horário',
+    label: 'No horÃ¡rio',
     color: '#22c55e',
     textClass: 'text-green-700 dark:text-green-300',
     chipClass: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
@@ -29,7 +29,7 @@ const STATUS_META = {
     chipClass: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200'
   },
   [TimeRecordStatus.LATE_EXIT]: {
-    label: 'Saída após horário',
+    label: 'SaÃ­da apÃ³s horÃ¡rio',
     color: '#f97316',
     textClass: 'text-orange-700 dark:text-orange-300',
     chipClass: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200'
@@ -410,7 +410,7 @@ const Dashboard = () => {
           : (record.entrada_real || record.entrada_contratual || record.saida_real || '--:--');
 
         const action = scope === 'saida'
-          ? 'Registro de saída'
+          ? 'Registro de saÃ­da'
           : scope === 'entrada'
             ? 'Registro de entrada'
             : 'Registro de ponto';
@@ -430,7 +430,7 @@ const Dashboard = () => {
       {
         id: 1,
         user: 'Nenhum registro',
-        action: filter ? 'Nenhum registro para este filtro' : 'Faça upload de dados',
+        action: filter ? 'Nenhum registro para este filtro' : 'FaÃ§a upload de dados',
         time: '--:--',
         status: TimeRecordStatus.ON_TIME
       }
@@ -439,7 +439,7 @@ const Dashboard = () => {
 
   const summaryItems = [
     {
-      label: 'Usuários',
+      label: 'UsuÃ¡rios',
       value: dashboardData.uniqueUsers.toString(),
       helper: 'cadastrados',
       icon: Users,
@@ -455,7 +455,7 @@ const Dashboard = () => {
     {
       label: 'Pontualidade',
       value: `${dashboardData.punctualityRate}%`,
-      helper: 'no horário',
+      helper: 'no horÃ¡rio',
       icon: CheckCircle,
       accentClass: 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-200'
     },
@@ -467,7 +467,7 @@ const Dashboard = () => {
       accentClass: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-200'
     },
     {
-      label: 'Saída após horário',
+      label: 'SaÃ­da apÃ³s horÃ¡rio',
       value: dashboardData.lateExitCount.toString(),
       helper: 'total',
       icon: Clock,
@@ -479,14 +479,14 @@ const Dashboard = () => {
   const getStatusBadgeClass = (status) => STATUS_META[status]?.chipClass || 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200';
 
   const activeFilterLabel = activeStatusFilter
-    ? `${activeStatusFilter.scope === 'entrada' ? 'Entrada' : 'Saída'} · ${getStatusLabel(activeStatusFilter.status)}`
+    ? `${activeStatusFilter.scope === 'entrada' ? 'Entrada' : 'SaÃ­da'} Â· ${getStatusLabel(activeStatusFilter.status)}`
     : null;
 
   return (
     <>
       <Helmet>
         <title>Dashboard - Controle de Ponto</title>
-        <meta name="description" content="Dashboard principal do sistema de controle de ponto com métricas e atividades recentes." />
+        <meta name="description" content="Dashboard principal do sistema de controle de ponto com mÃ©tricas e atividades recentes." />
       </Helmet>
 
       <Layout>
@@ -500,7 +500,7 @@ const Dashboard = () => {
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
                 <p className="text-gray-600 dark:text-gray-400 mt-2">
-                  Visão geral do sistema de controle de ponto
+                  VisÃ£o geral do sistema de controle de ponto
                 </p>
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -529,14 +529,14 @@ const Dashboard = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <StatusPieCard
                   title="Entradas"
-                  subtitle="Distribuição por status de entrada"
+                  subtitle="DistribuiÃ§Ã£o por status de entrada"
                   data={entryChartData}
                   activeKey={activeStatusFilter?.scope === 'entrada' ? activeStatusFilter.status : null}
                   onSelect={handleEntrySelect}
                 />
                 <StatusPieCard
-                  title="Saídas"
-                  subtitle="Distribuição por status de saída"
+                  title="SaÃ­das"
+                  subtitle="DistribuiÃ§Ã£o por status de saÃ­da"
                   data={exitChartData}
                   activeKey={activeStatusFilter?.scope === 'saida' ? activeStatusFilter.status : null}
                   onSelect={handleExitSelect}
@@ -550,7 +550,7 @@ const Dashboard = () => {
                     Atividade recente
                   </CardTitle>
                   <CardDescription>
-                    Últimos registros de ponto e filtro por status
+                    Ãšltimos registros de ponto e filtro por status
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -595,7 +595,7 @@ const Dashboard = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-secondary-500" />
-                    Estatísticas do mês
+                    EstatÃ­sticas do mÃªs
                   </CardTitle>
                   <CardDescription>
                     Resumo mensal de registros
@@ -608,7 +608,7 @@ const Dashboard = () => {
                       <span className="font-semibold text-gray-900 dark:text-gray-100">{allRecords.length}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-600 dark:text-gray-400">Média diária</span>
+                      <span className="text-gray-600 dark:text-gray-400">MÃ©dia diÃ¡ria</span>
                       <span className="font-semibold text-gray-900 dark:text-gray-100">{dashboardData.monthlyAverage}</span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -620,12 +620,12 @@ const Dashboard = () => {
                       <span className="font-semibold text-red-600 dark:text-red-400">{dashboardData.lateCount}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-600 dark:text-gray-400">Saída após horário</span>
+                      <span className="text-gray-600 dark:text-gray-400">SaÃ­da apÃ³s horÃ¡rio</span>
                       <span className="font-semibold text-orange-600 dark:text-orange-400">{dashboardData.lateExitCount}</span>
                     </div>
                     <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
                       <div className="flex justify-between items-center">
-                        <span className="text-gray-600 dark:text-gray-400">Tendência</span>
+                        <span className="text-gray-600 dark:text-gray-400">TendÃªncia</span>
                         <span className="font-semibold text-primary-600 dark:text-primary-400 flex items-center gap-1">
                           <TrendingUp className="w-4 h-4" />
                           {allRecords.length > 0 ? '+5.2%' : '0%'}
@@ -644,3 +644,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+
