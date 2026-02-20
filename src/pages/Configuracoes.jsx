@@ -23,6 +23,7 @@ const Configuracoes = () => {
   const initialTimeSettings = {
     [TimeRecordStatus.ON_TIME]: 5,
     [TimeRecordStatus.LATE]: 5,
+    [TimeRecordStatus.LATE_EXIT]: 5,
     [TimeRecordStatus.EARLY]: 5,
     [TimeRecordStatus.ADJUSTED]: 5
   };
@@ -43,6 +44,9 @@ const Configuracoes = () => {
       [TimeRecordStatus.LATE]: Number.isFinite(settings?.[TimeRecordStatus.LATE])
         ? settings[TimeRecordStatus.LATE]
         : baseTolerance,
+      [TimeRecordStatus.LATE_EXIT]: Number.isFinite(settings?.[TimeRecordStatus.LATE_EXIT])
+        ? settings[TimeRecordStatus.LATE_EXIT]
+        : baseTolerance,
       [TimeRecordStatus.EARLY]: Number.isFinite(settings?.[TimeRecordStatus.EARLY])
         ? settings[TimeRecordStatus.EARLY]
         : baseTolerance,
@@ -57,7 +61,7 @@ const Configuracoes = () => {
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
       if (config.timeSettings) setTimeSettings(normalizeTimeSettings(config.timeSettings));
-      if (config.statusColors) setStatusColors(config.statusColors);
+      if (config.statusColors) setStatusColors({ ...StatusColors, ...config.statusColors });
     }
   }, []);
 
@@ -114,6 +118,7 @@ const Configuracoes = () => {
   const toleranceOptions = Array.from({ length: 61 }, (_, i) => i); // 0 to 60 minutes
   const onTimeTolerance = timeSettings?.[TimeRecordStatus.ON_TIME] ?? 5;
   const lateTolerance = timeSettings?.[TimeRecordStatus.LATE] ?? 5;
+  const lateExitTolerance = timeSettings?.[TimeRecordStatus.LATE_EXIT] ?? 5;
   const earlyTolerance = timeSettings?.[TimeRecordStatus.EARLY] ?? 5;
   const adjustedTolerance = timeSettings?.[TimeRecordStatus.ADJUSTED] ?? 5;
 
@@ -225,10 +230,16 @@ const Configuracoes = () => {
                     statusKey={TimeRecordStatus.ON_TIME}
                   />
                   <TimeSettingInput 
-                    label="Tolerância de Atraso" 
+                    label="Tolerância de Atraso (Entrada)" 
                     icon={AlertTriangle}
-                    description="Minutos após o horário previsto para considerar o registro atrasado."
+                    description="Minutos após o horário previsto de entrada para considerar o registro atrasado."
                     statusKey={TimeRecordStatus.LATE}
+                  />
+                  <TimeSettingInput 
+                    label="Tolerância de Saída após Horário" 
+                    icon={AlertTriangle}
+                    description="Minutos após o horário previsto de saída para considerar o registro após o horário."
+                    statusKey={TimeRecordStatus.LATE_EXIT}
                   />
                   <TimeSettingInput 
                     label="Tolerância de Antecipação" 
@@ -247,7 +258,8 @@ const Configuracoes = () => {
                     <h4 className="font-medium text-blue-900 mb-2 dark:text-gray-100">Como funciona:</h4>
                     <ul className="text-sm text-blue-800 space-y-1 dark:text-gray-200">
                       <li>• <strong>No Horário:</strong> Até {onTimeTolerance} min de diferença do horário</li>
-                      <li>• <strong>Atrasado:</strong> Mais de {lateTolerance} min após o horário</li>
+                      <li>• <strong>Atrasado (Entrada):</strong> Mais de {lateTolerance} min após o horário de entrada</li>
+                      <li>• <strong>Saída após Horário:</strong> Mais de {lateExitTolerance} min após o horário de saída</li>
                       <li>• <strong>Antecipado:</strong> Mais de {earlyTolerance} min antes do horário</li>
                       <li>• <strong>Ajustado:</strong> Registros marcados com * (referência: {adjustedTolerance} min)</li>
                     </ul>
@@ -274,6 +286,7 @@ const Configuracoes = () => {
                 <CardContent className="space-y-4 sm:space-y-6">
                   <ColorPicker status={TimeRecordStatus.ON_TIME} currentColor={statusColors[TimeRecordStatus.ON_TIME]} label="No Horário" />
                   <ColorPicker status={TimeRecordStatus.LATE} currentColor={statusColors[TimeRecordStatus.LATE]} label="Atrasado" />
+                  <ColorPicker status={TimeRecordStatus.LATE_EXIT} currentColor={statusColors[TimeRecordStatus.LATE_EXIT]} label="Saída após Horário" />
                   <ColorPicker status={TimeRecordStatus.EARLY} currentColor={statusColors[TimeRecordStatus.EARLY]} label="Antecipado" />
                   <ColorPicker status={TimeRecordStatus.ADJUSTED} currentColor={statusColors[TimeRecordStatus.ADJUSTED]} label="Ajustado" />
 
@@ -286,6 +299,7 @@ const Configuracoes = () => {
                           <span className="text-xs text-gray-600 dark:text-gray-300">
                             {status === TimeRecordStatus.ON_TIME ? 'No horário' : 
                              status === TimeRecordStatus.LATE ? 'Atrasado' :
+                             status === TimeRecordStatus.LATE_EXIT ? 'Saída após horário' :
                              status === TimeRecordStatus.EARLY ? 'Antecipado' : 'Ajustado'}
                           </span>
                         </div>

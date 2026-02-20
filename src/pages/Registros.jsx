@@ -81,10 +81,38 @@ const Registros = () => {
   const [hasDateFilter, setHasDateFilter] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [pendingExitLateMigration, setPendingExitLateMigration] = useState(false);
 
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const { user } = useAuth();
+
+  const normalizeRecords = (records = []) => {
+    let hadLegacyExitLate = false;
+    const normalized = records.map((record) => {
+      if (record?.status_saida === TimeRecordStatus.LATE) {
+        hadLegacyExitLate = true;
+        return { ...record, status_saida: TimeRecordStatus.LATE_EXIT };
+      }
+      return record;
+    });
+
+    return { normalized, hadLegacyExitLate };
+  };
+
+  const migrateExitLateInSupabase = async () => {
+    if (!user) return;
+
+    const { error } = await supabase
+      .from('ponto_registros')
+      .update({ status_saida: TimeRecordStatus.LATE_EXIT })
+      .eq('user_id', user.id)
+      .eq('status_saida', TimeRecordStatus.LATE);
+
+    if (error) {
+      console.error('Erro ao migrar status de saída:', error);
+    }
+  };
 
   const normalizeTimeSettings = (settings = {}) => {
     const baseTolerance = Number.isFinite(settings?.toleranceMinutes)
@@ -97,6 +125,9 @@ const Registros = () => {
         : baseTolerance,
       [TimeRecordStatus.LATE]: Number.isFinite(settings?.[TimeRecordStatus.LATE])
         ? settings[TimeRecordStatus.LATE]
+        : baseTolerance,
+      [TimeRecordStatus.LATE_EXIT]: Number.isFinite(settings?.[TimeRecordStatus.LATE_EXIT])
+        ? settings[TimeRecordStatus.LATE_EXIT]
         : baseTolerance,
       [TimeRecordStatus.EARLY]: Number.isFinite(settings?.[TimeRecordStatus.EARLY])
         ? settings[TimeRecordStatus.EARLY]
@@ -123,7 +154,11 @@ const Registros = () => {
       }
       
       if (data && data.length > 0) {
-        setAllRecords(data);
+        const { normalized, hadLegacyExitLate } = normalizeRecords(data);
+        setAllRecords(normalized);
+        if (hadLegacyExitLate) {
+          await migrateExitLateInSupabase();
+        }
       }
     } catch (error) {
       console.error('Erro ao conectar com Supabase:', error);
@@ -137,7 +172,7 @@ const Registros = () => {
     if (savedConfig) {
       const config = JSON.parse(savedConfig);
       normalizedSettings = normalizeTimeSettings(config?.timeSettings);
-      if (config.statusColors) setStatusColors(config.statusColors);
+      if (config.statusColors) setStatusColors({ ...StatusColors, ...config.statusColors });
     }
     setTimeSettings(normalizedSettings);
 
@@ -146,7 +181,11 @@ const Registros = () => {
     if (savedRecords) {
       try {
         const records = JSON.parse(savedRecords);
-        setAllRecords(records);
+        const { normalized, hadLegacyExitLate } = normalizeRecords(records);
+        setAllRecords(normalized);
+        if (hadLegacyExitLate) {
+          setPendingExitLateMigration(true);
+        }
       } catch (error) {
         console.error('Erro ao carregar registros salvos:', error);
       }
@@ -161,7 +200,17 @@ const Registros = () => {
     if (user && allRecords.length === 0) {
       loadRecordsFromSupabase();
     }
+    if (user) {
+      setPendingExitLateMigration(true);
+    }
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !pendingExitLateMigration) return;
+
+    migrateExitLateInSupabase()
+      .finally(() => setPendingExitLateMigration(false));
+  }, [user, pendingExitLateMigration]);
 
   // Salvar registros no localStorage sempre que allRecords mudar
   useEffect(() => {
@@ -235,9 +284,23 @@ const Registros = () => {
   const pageStart = filteredRecords.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const pageEnd = Math.min(filteredRecords.length, currentPage * pageSize);
 
+  const normalizeHexColor = (value) => {
+    if (!value || typeof value !== 'string') return '';
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === 'white') return 'ffffff';
+    let hex = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+    if (hex.length === 3) {
+      hex = hex.split('').map((c) => c + c).join('');
+    }
+    if (!/^[0-9a-f]{6}$/.test(hex)) return '';
+    return hex;
+  };
+
+  const isWhiteColor = (value) => normalizeHexColor(value) === 'ffffff';
+
   const getStatusColor = (status) => {
     const color = statusColors[status] || '#a1a1aa';
-    const textColor = color === '#ffffff' ? '#000000' : '#ffffff';
+    const textColor = isWhiteColor(color) ? '#000000' : '#ffffff';
     
     return {
       backgroundColor: color,
@@ -249,10 +312,27 @@ const Registros = () => {
     const texts = {
       [TimeRecordStatus.ON_TIME]: 'No horário',
       [TimeRecordStatus.LATE]: 'Atrasado',
+      [TimeRecordStatus.LATE_EXIT]: 'Saída após Horário',
       [TimeRecordStatus.EARLY]: 'Antecipado',
       [TimeRecordStatus.ADJUSTED]: 'Ajustado',
     };
     return texts[status] || 'Desconhecido';
+  };
+
+  const formatDateForExport = (value) => {
+    if (!value) return '';
+    if (typeof value !== 'string') return value;
+
+    const isoDate = parseISO(value);
+    if (isValid(isoDate)) return format(isoDate, 'dd-MM-yyyy');
+
+    const brDate = parse(value, 'dd/MM/yyyy', new Date());
+    if (isValid(brDate)) return format(brDate, 'dd-MM-yyyy');
+
+    const dashDate = parse(value, 'dd-MM-yyyy', new Date());
+    if (isValid(dashDate)) return format(dashDate, 'dd-MM-yyyy');
+
+    return value;
   };
 
   const formatTimeForSupabase = (timeStr) => {
@@ -364,7 +444,7 @@ const Registros = () => {
     }
   };
 
-  const getStatus = (contractual, actual) => {
+  const getStatus = (contractual, actual, { isExit = false } = {}) => {
     if (!actual || actual === '') return null;
     
     // Se tem asterisco (*), é ajustado
@@ -391,12 +471,18 @@ const Registros = () => {
     const lateTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.LATE])
       ? timeSettings[TimeRecordStatus.LATE]
       : onTimeTolerance;
+    const lateExitTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.LATE_EXIT])
+      ? timeSettings[TimeRecordStatus.LATE_EXIT]
+      : lateTolerance;
     const earlyTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.EARLY])
       ? timeSettings[TimeRecordStatus.EARLY]
       : onTimeTolerance;
 
-    if (diffMinutes > lateTolerance) {
-      return TimeRecordStatus.LATE;
+    const appliedLateTolerance = isExit ? lateExitTolerance : lateTolerance;
+    const lateStatus = isExit ? TimeRecordStatus.LATE_EXIT : TimeRecordStatus.LATE;
+
+    if (diffMinutes > appliedLateTolerance) {
+      return lateStatus;
     }
     if (diffMinutes < -earlyTolerance) {
       return TimeRecordStatus.EARLY;
@@ -404,7 +490,7 @@ const Registros = () => {
     if (Math.abs(diffMinutes) <= onTimeTolerance) {
       return TimeRecordStatus.ON_TIME;
     }
-    return diffMinutes > 0 ? TimeRecordStatus.LATE : TimeRecordStatus.EARLY;
+    return diffMinutes > 0 ? lateStatus : TimeRecordStatus.EARLY;
   };
 
   const handleFileChange = (event) => {
@@ -494,7 +580,8 @@ const Registros = () => {
           } else {
             exitStatus = getStatus(
               contractualHours.saida,
-              saidaReal
+              saidaReal,
+              { isExit: true }
             );
           }
 
@@ -584,7 +671,7 @@ const Registros = () => {
           record.equipamento,
           record.entrada_contratual,
           record.saida_contratual,
-          record.data_batida,
+          formatDateForExport(record.data_batida),
           record.entrada_real,
           record.saida_real,
           getStatusText(record.status_entrada),
@@ -605,12 +692,8 @@ const Registros = () => {
               pattern: 'solid',
               fgColor: { argb: 'FF' + entradaColor.replace('#', '') }
             };
-            // Add white text for better contrast on dark backgrounds
-            if (['#ef4444', '#f59e0b'].includes(entradaColor)) {
-              entradaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
             // Add black text for white background
-            if (entradaColor === '#ffffff') {
+            if (isWhiteColor(entradaColor)) {
               entradaCell.font = { color: { argb: 'FF000000' } };
               entradaCell.border = {
                 top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -618,6 +701,9 @@ const Registros = () => {
                 bottom: { style: 'thin', color: { argb: 'FF000000' } },
                 right: { style: 'thin', color: { argb: 'FF000000' } }
               };
+            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(entradaColor)) {
+              // Add white text for better contrast on dark backgrounds
+              entradaCell.font = { color: { argb: 'FFFFFFFF' } };
             }
           }
         }
@@ -632,12 +718,8 @@ const Registros = () => {
               pattern: 'solid',
               fgColor: { argb: 'FF' + saidaColor.replace('#', '') }
             };
-            // Add white text for better contrast on dark backgrounds
-            if (['#ef4444', '#f59e0b'].includes(saidaColor)) {
-              saidaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
             // Add black text for white background
-            if (saidaColor === '#ffffff') {
+            if (isWhiteColor(saidaColor)) {
               saidaCell.font = { color: { argb: 'FF000000' } };
               saidaCell.border = {
                 top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -645,6 +727,9 @@ const Registros = () => {
                 bottom: { style: 'thin', color: { argb: 'FF000000' } },
                 right: { style: 'thin', color: { argb: 'FF000000' } }
               };
+            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(saidaColor)) {
+              // Add white text for better contrast on dark backgrounds
+              saidaCell.font = { color: { argb: 'FFFFFFFF' } };
             }
           }
         }
@@ -660,11 +745,8 @@ const Registros = () => {
               pattern: 'solid',
               fgColor: { argb: 'FF' + entradaColor.replace('#', '') }
             };
-            if (['#ef4444', '#f59e0b'].includes(entradaColor)) {
-              statusEntradaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
             // Add black text for white background
-            if (entradaColor === '#ffffff') {
+            if (isWhiteColor(entradaColor)) {
               statusEntradaCell.font = { color: { argb: 'FF000000' } };
               statusEntradaCell.border = {
                 top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -672,6 +754,8 @@ const Registros = () => {
                 bottom: { style: 'thin', color: { argb: 'FF000000' } },
                 right: { style: 'thin', color: { argb: 'FF000000' } }
               };
+            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(entradaColor)) {
+              statusEntradaCell.font = { color: { argb: 'FFFFFFFF' } };
             }
           }
         }
@@ -686,11 +770,8 @@ const Registros = () => {
               pattern: 'solid',
               fgColor: { argb: 'FF' + saidaColor.replace('#', '') }
             };
-            if (['#ef4444', '#f59e0b'].includes(saidaColor)) {
-              statusSaidaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
             // Add black text for white background
-            if (saidaColor === '#ffffff') {
+            if (isWhiteColor(saidaColor)) {
               statusSaidaCell.font = { color: { argb: 'FF000000' } };
               statusSaidaCell.border = {
                 top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -698,6 +779,8 @@ const Registros = () => {
                 bottom: { style: 'thin', color: { argb: 'FF000000' } },
                 right: { style: 'thin', color: { argb: 'FF000000' } }
               };
+            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(saidaColor)) {
+              statusSaidaCell.font = { color: { argb: 'FFFFFFFF' } };
             }
           }
         }
@@ -782,6 +865,7 @@ const Registros = () => {
   const summary = useMemo(() => {
     let onTime = 0;
     let late = 0;
+    let lateExit = 0;
     let early = 0;
     let adjusted = 0;
 
@@ -794,12 +878,13 @@ const Registros = () => {
 
       // Contar status de saída
       if (record.status_saida === TimeRecordStatus.ON_TIME) onTime++;
-      else if (record.status_saida === TimeRecordStatus.LATE) late++;
+      else if (record.status_saida === TimeRecordStatus.LATE_EXIT) lateExit++;
+      else if (record.status_saida === TimeRecordStatus.LATE) lateExit++;
       else if (record.status_saida === TimeRecordStatus.EARLY) early++;
       else if (record.status_saida === TimeRecordStatus.ADJUSTED) adjusted++;
     });
 
-    return { total: filteredRecords.length, onTime, late, early, adjusted };
+    return { total: filteredRecords.length, onTime, late, lateExit, early, adjusted };
   }, [filteredRecords]);
 
   const handleFilterClick = (status) => {
@@ -1128,7 +1213,7 @@ const Registros = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-6"
           >
             <div className="min-w-0">
               <MetricCard
@@ -1157,6 +1242,16 @@ const Registros = () => {
                 icon={AlertTriangle}
                 color={activeFilters.has(TimeRecordStatus.LATE) ? "danger" : "secondary"}
                 onClick={() => handleFilterClick(TimeRecordStatus.LATE)}
+                clickable
+              />
+            </div>
+            <div className="min-w-0">
+              <MetricCard
+                title="Saída após Horário"
+                value={summary.lateExit}
+                icon={Clock}
+                color={activeFilters.has(TimeRecordStatus.LATE_EXIT) ? "warning" : "secondary"}
+                onClick={() => handleFilterClick(TimeRecordStatus.LATE_EXIT)}
                 clickable
               />
             </div>
@@ -1197,6 +1292,7 @@ const Registros = () => {
                         <span key={status} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
                           {status === TimeRecordStatus.ON_TIME ? 'No Horário' :
                            status === TimeRecordStatus.LATE ? 'Atrasos' :
+                           status === TimeRecordStatus.LATE_EXIT ? 'Saída após Horário' :
                            status === TimeRecordStatus.EARLY ? 'Antecipados' :
                            status === TimeRecordStatus.ADJUSTED ? 'Ajustados' : status}
                           <button 
@@ -1347,8 +1443,8 @@ const Registros = () => {
                             </td>
                             <td className="py-4 px-4 text-sm">
                               <div 
-                                className="font-medium px-2 py-1 rounded"
-                                style={record.status_entrada ? getStatusColor(record.status_entrada) : { backgroundColor: '#f3f4f6' }}
+                                className={`font-medium px-2 py-1 rounded ${record.status_entrada ? '' : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'}`}
+                                style={record.status_entrada ? getStatusColor(record.status_entrada) : undefined}
                               >
                                 {record.entrada_real || record.entrada_contratual || '-'}
                               </div>
@@ -1364,7 +1460,7 @@ const Registros = () => {
                                     {getStatusText(record.status_entrada)}
                                   </span>
                                 ) : (
-                                  <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                                  <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
                                     Sem status
                                   </span>
                                 )}
@@ -1379,15 +1475,15 @@ const Registros = () => {
                                   {getStatusText(record.status_entrada)}
                                 </span>
                               ) : (
-                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
                                   Sem status
                                 </span>
                               )}
                             </td>
                             <td className="py-4 px-4 text-sm hidden xl:table-cell">
                               <div 
-                                className="font-medium px-2 py-1 rounded"
-                                style={record.status_saida ? getStatusColor(record.status_saida) : { backgroundColor: '#f3f4f6' }}
+                                className={`font-medium px-2 py-1 rounded ${record.status_saida ? '' : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'}`}
+                                style={record.status_saida ? getStatusColor(record.status_saida) : undefined}
                               >
                                 {record.saida_real || 'S/R'}
                               </div>
@@ -1404,7 +1500,7 @@ const Registros = () => {
                                   {getStatusText(record.status_saida)}
                                 </span>
                               ) : (
-                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
                                   Sem status
                                 </span>
                               )}
