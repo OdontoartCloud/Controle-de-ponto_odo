@@ -323,14 +323,14 @@ const Registros = () => {
     if (!value) return '';
     if (typeof value !== 'string') return value;
 
-    const isoDate = parseISO(value);
-    if (isValid(isoDate)) return format(isoDate, 'dd-MM-yyyy');
-
     const brDate = parse(value, 'dd/MM/yyyy', new Date());
-    if (isValid(brDate)) return format(brDate, 'dd-MM-yyyy');
+    if (isValid(brDate)) return format(brDate, 'dd/MM/yyyy');
 
     const dashDate = parse(value, 'dd-MM-yyyy', new Date());
-    if (isValid(dashDate)) return format(dashDate, 'dd-MM-yyyy');
+    if (isValid(dashDate)) return format(dashDate, 'dd/MM/yyyy');
+
+    const isoDate = parseISO(value);
+    if (isValid(isoDate)) return format(isoDate, 'dd/MM/yyyy');
 
     return value;
   };
