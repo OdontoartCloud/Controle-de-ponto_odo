@@ -1,6 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://kmtfbojprxwancimeieu.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttdGZib2pwcnh3YW5jaW1laWV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM4MTY3MTUsImV4cCI6MjA2OTM5MjcxNX0.PlgfVW3Lf0s4zrAYs392cnv_mthb3Qw7XdAe8kIZOIw';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured) {
+  console.warn(
+    'Supabase não configurado no ambiente local. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY em .env.local.'
+  );
+}
+
+// Mantemos um cliente válido estruturalmente para que a aplicação possa renderizar
+// mesmo sem configuração local. As chamadas de Auth são bloqueadas pelo AuthContext
+// com uma mensagem explícita, evitando o erro confuso "Invalid API key".
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-anon-key'
+);

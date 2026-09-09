@@ -1,1530 +1,339 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { motion } from 'framer-motion';
 import {
-  Upload,
+  AlertCircle,
+  Building,
+  Check,
+  Clock3,
   Download,
+  FileText,
+  Pencil,
+  RefreshCw,
   Search,
-  Filter,
-  FileSpreadsheet,
-  Calendar,
-  Clock,
-  Trash2,
-  AlertTriangle,
-  X,
+  Settings,
+  Users,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import ExcelJS from 'exceljs';
-import { DateRange } from 'react-date-range';
-import { format } from 'date-fns';
-import { parse } from 'date-fns';
-import { isValid } from 'date-fns';
-import { supabase } from '@/lib/customSupabaseClient';
+import { endOfMonth, format, startOfMonth } from 'date-fns';
 import Layout from '@/components/layout/Layout';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useToast } from '@/components/ui/use-toast';
-import { TimeRecordStatus, StatusColors } from '@/types';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { useToast } from '@/components/ui/use-toast';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import MetricCard from '@/components/MetricCard';
-import { v4 as uuidv4 } from 'uuid';
-import 'react-date-range/dist/styles.css';
-import 'react-date-range/dist/theme/default.css';
-import { parseISO } from 'date-fns';
+  DEFAULT_SETTINGS,
+  fetchAllAttendance,
+  fetchAttendancePage,
+  fetchFilterOptions,
+  importAttendanceFromFlash,
+  loadAttendanceSettings,
+  STATUS_LABELS,
+} from '@/lib/attendanceService';
+import { TimeRecordStatus } from '@/types';
+
+const PAGE_SIZE = 10;
+const STATUS_OPTIONS = [
+  TimeRecordStatus.ON_TIME,
+  TimeRecordStatus.LATE,
+  TimeRecordStatus.LATE_EXIT,
+  TimeRecordStatus.EARLY,
+  TimeRecordStatus.ADJUSTED,
+];
+
+const CARD = 'rounded-2xl border border-[#dfe9d7] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900';
+const FIELD = 'h-11 w-full rounded-xl border border-[#d7e5cf] bg-white px-3 text-sm text-[#294436] outline-none transition focus:border-[#57D100] focus:ring-2 focus:ring-[#57D100]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100';
+
+const formatDate = (value) => value ? value.split('-').reverse().join('/') : '';
+const formatTime = (value) => value ? String(value).slice(0, 5) : '—';
+
+const monthRange = (month) => {
+  const date = new Date(`${month}-01T12:00:00`);
+  return {
+    startDate: format(startOfMonth(date), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(date), 'yyyy-MM-dd'),
+  };
+};
+
+const StatusBadge = ({ status, colors }) => {
+  if (!status) return <span className="text-slate-400">—</span>;
+  const color = colors[status] || '#64748b';
+  return (
+    <span className="inline-flex min-w-28 items-center justify-center gap-2 rounded-full px-3 py-1 text-xs font-medium" style={{ color, backgroundColor: `${color}18` }}>
+      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+      {STATUS_LABELS[status] || status}
+    </span>
+  );
+};
+
+const MetricCard = ({ icon: Icon, label, value, helper, color }) => (
+  <div className={`${CARD} p-4`}>
+    <div className="flex items-start gap-3">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ color, backgroundColor: `${color}16` }}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-[#6a8073] dark:text-slate-400">{label}</p>
+        <strong className="mt-1 block text-2xl text-[#173c2c] dark:text-slate-100">{value}</strong>
+        <span className="text-[11px] text-slate-400">{helper}</span>
+      </div>
+    </div>
+  </div>
+);
+
+const ApiBanner = () => (
+  <section className="mt-5 grid gap-6 rounded-2xl border border-[#cfe8bf] bg-[linear-gradient(110deg,#f3fced_0%,#ffffff_60%,#f1f9ec_100%)] px-6 py-5 shadow-sm dark:border-emerald-900/60 dark:bg-none dark:bg-emerald-950/20 lg:grid-cols-[1fr_360px] lg:items-center">
+    <div className="flex items-center gap-5">
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#e7f7dc] text-[#2e9e16] dark:bg-emerald-950 dark:text-emerald-300">
+        <RefreshCw className="h-8 w-8" />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-[#173c2c] dark:text-slate-100">Dados importados manualmente via API</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-[#647c6e] dark:text-slate-400">
+          Os registros são consultados em todas as empresas Flash configuradas, uma vez por dia e por empresa, sem consulta de batidas por colaborador.
+        </p>
+      </div>
+    </div>
+    <div className="space-y-2 border-l border-[#cfe8bf] pl-6 text-sm text-[#647c6e] dark:border-slate-700 dark:text-slate-400">
+      {['Todas as empresas configuradas', 'Importação manual por período', 'Exportação baseada nos filtros aplicados'].map((text) => (
+        <div key={text} className="flex items-center gap-3"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#21a653] text-white"><Check className="h-3.5 w-3.5" /></span>{text}</div>
+      ))}
+    </div>
+  </section>
+);
 
 const Registros = () => {
-  const [allRecords, setAllRecords] = useState([]);
-  const [filteredRecords, setFilteredRecords] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilters, setActiveFilters] = useState(new Set(['all']));
-  const [timeSettings, setTimeSettings] = useState({});
-  const [statusColors, setStatusColors] = useState(StatusColors);
-  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
-  const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
-  const [nameFilter, setNameFilter] = useState('all');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [dateRange, setDateRange] = useState([
-    {
-      startDate: new Date(),
-      endDate: new Date(),
-      key: 'selection'
-    }
-  ]);
-  const [hasDateFilter, setHasDateFilter] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-  const [pendingExitLateMigration, setPendingExitLateMigration] = useState(false);
-
-  const { toast } = useToast();
-  const fileInputRef = useRef(null);
   const { user } = useAuth();
+  const { toast } = useToast();
+  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const initialRange = monthRange(month);
+  const [filters, setFilters] = useState({ ...initialRange, search: '', company: 'all', employee: 'all', department: 'all', status: 'all' });
+  const [appliedFilters, setAppliedFilters] = useState(filters);
+  const [records, setRecords] = useState([]);
+  const [summaryRecords, setSummaryRecords] = useState([]);
+  const [count, setCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [options, setOptions] = useState({ companies: [], employees: [], departments: [] });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const normalizeRecords = (records = []) => {
-    let hadLegacyExitLate = false;
-    const normalized = records.map((record) => {
-      if (record?.status_saida === TimeRecordStatus.LATE) {
-        hadLegacyExitLate = true;
-        return { ...record, status_saida: TimeRecordStatus.LATE_EXIT };
-      }
-      return record;
-    });
+  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
-    return { normalized, hadLegacyExitLate };
-  };
-
-  const migrateExitLateInSupabase = async () => {
-    if (!user) return;
-
-    const { error } = await supabase
-      .from('ponto_registros')
-      .update({ status_saida: TimeRecordStatus.LATE_EXIT })
-      .eq('user_id', user.id)
-      .eq('status_saida', TimeRecordStatus.LATE);
-
-    if (error) {
-      console.error('Erro ao migrar status de saída:', error);
-    }
-  };
-
-  const normalizeTimeSettings = (settings = {}) => {
-    const baseTolerance = Number.isFinite(settings?.toleranceMinutes)
-      ? settings.toleranceMinutes
-      : 5;
-
-    return {
-      [TimeRecordStatus.ON_TIME]: Number.isFinite(settings?.[TimeRecordStatus.ON_TIME])
-        ? settings[TimeRecordStatus.ON_TIME]
-        : baseTolerance,
-      [TimeRecordStatus.LATE]: Number.isFinite(settings?.[TimeRecordStatus.LATE])
-        ? settings[TimeRecordStatus.LATE]
-        : baseTolerance,
-      [TimeRecordStatus.LATE_EXIT]: Number.isFinite(settings?.[TimeRecordStatus.LATE_EXIT])
-        ? settings[TimeRecordStatus.LATE_EXIT]
-        : baseTolerance,
-      [TimeRecordStatus.EARLY]: Number.isFinite(settings?.[TimeRecordStatus.EARLY])
-        ? settings[TimeRecordStatus.EARLY]
-        : baseTolerance,
-      [TimeRecordStatus.ADJUSTED]: Number.isFinite(settings?.[TimeRecordStatus.ADJUSTED])
-        ? settings[TimeRecordStatus.ADJUSTED]
-        : baseTolerance,
-    };
-  };
-
-  // Carregar registros do Supabase
-  const loadRecordsFromSupabase = async () => {
-    if (!user) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('ponto_registros')
-        .select('*')
-        .eq('user_id', user.id);
-      
-      if (error) {
-        console.error('Erro ao carregar registros:', error);
-        return;
-      }
-      
-      if (data && data.length > 0) {
-        const { normalized, hadLegacyExitLate } = normalizeRecords(data);
-        setAllRecords(normalized);
-        if (hadLegacyExitLate) {
-          await migrateExitLateInSupabase();
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao conectar com Supabase:', error);
-    }
-  };
-
-  // Carregar configurações e registros salvos
   useEffect(() => {
-    const savedConfig = localStorage.getItem('timeControlConfig');
-    let normalizedSettings = normalizeTimeSettings();
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      normalizedSettings = normalizeTimeSettings(config?.timeSettings);
-      if (config.statusColors) setStatusColors({ ...StatusColors, ...config.statusColors });
-    }
-    setTimeSettings(normalizedSettings);
+    const range = monthRange(month);
+    setFilters((old) => ({ ...old, ...range }));
+  }, [month]);
 
-    // Carregar registros salvos
-    const savedRecords = localStorage.getItem('timeControlRecords');
-    if (savedRecords) {
-      try {
-        const records = JSON.parse(savedRecords);
-        const { normalized, hadLegacyExitLate } = normalizeRecords(records);
-        setAllRecords(normalized);
-        if (hadLegacyExitLate) {
-          setPendingExitLateMigration(true);
-        }
-      } catch (error) {
-        console.error('Erro ao carregar registros salvos:', error);
-      }
-    } else {
-      // Se não há registros salvos localmente, tentar carregar do Supabase
-      loadRecordsFromSupabase();
-    }
-  }, []);
-
-  // Carregar registros quando o usuário estiver disponível
   useEffect(() => {
-    if (user && allRecords.length === 0) {
-      loadRecordsFromSupabase();
-    }
-    if (user) {
-      setPendingExitLateMigration(true);
-    }
+    const timer = setTimeout(() => {
+      setPage(1);
+      setAppliedFilters({ ...filters });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [filters]);
+
+  useEffect(() => {
+    if (!user) return;
+    Promise.all([fetchFilterOptions(user.id), loadAttendanceSettings(user.id)])
+      .then(([loadedOptions, loadedSettings]) => {
+        setOptions(loadedOptions);
+        setSettings(loadedSettings);
+      })
+      .catch((error) => toast({ title: 'Erro ao carregar filtros', description: error.message, variant: 'destructive' }));
   }, [user]);
 
-  useEffect(() => {
-    if (!user || !pendingExitLateMigration) return;
-
-    migrateExitLateInSupabase()
-      .finally(() => setPendingExitLateMigration(false));
-  }, [user, pendingExitLateMigration]);
-
-  // Salvar registros no localStorage sempre que allRecords mudar
-  useEffect(() => {
-    if (allRecords.length > 0) {
-      localStorage.setItem('timeControlRecords', JSON.stringify(allRecords));
-    }
-  }, [allRecords]);
-
-  // Aplicar filtros
-  useEffect(() => {
-    let recordsToFilter = [...allRecords];
-
-    // Filtro por status
-    if (!activeFilters.has('all') && activeFilters.size > 0) {
-      recordsToFilter = recordsToFilter.filter(
-        (r) => activeFilters.has(r.status_entrada) || activeFilters.has(r.status_saida)
-      );
-    }
-
-    // Filtro por busca
-    if (searchTerm) {
-      recordsToFilter = recordsToFilter.filter((record) =>
-        Object.values(record).some((val) =>
-          String(val).toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      );
-    }
-
-    // Filtro por nome
-    if (nameFilter !== 'all') {
-      recordsToFilter = recordsToFilter.filter(record => 
-        record.nome === nameFilter
-      );
-    }
-
-    // Filtro por departamento
-    if (departmentFilter !== 'all') {
-      recordsToFilter = recordsToFilter.filter(record => 
-        record.departamento === departmentFilter
-      );
-    }
-
-    // Filtro por período
-    if (hasDateFilter) {
-      const startDate = dateRange[0].startDate;
-      const endDate = dateRange[0].endDate;
-      
-      recordsToFilter = recordsToFilter.filter(record => {
-        const recordDate = new Date(record.data_batida + 'T00:00:00');
-        return recordDate >= startDate && recordDate <= endDate;
-      });
-    }
-
-    setFilteredRecords(recordsToFilter);
-    setCurrentPage(1);
-  }, [searchTerm, allRecords, activeFilters, nameFilter, departmentFilter, dateRange, hasDateFilter]);
-
-  useEffect(() => {
-    const nextTotalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
-    if (currentPage > nextTotalPages) {
-      setCurrentPage(nextTotalPages);
-    }
-  }, [filteredRecords.length, pageSize, currentPage]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
-  const pageSizeOptions = [50, 100, 150, 200];
-  const paginatedRecords = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return filteredRecords.slice(startIndex, startIndex + pageSize);
-  }, [filteredRecords, currentPage, pageSize]);
-  const pageStart = filteredRecords.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const pageEnd = Math.min(filteredRecords.length, currentPage * pageSize);
-
-  const normalizeHexColor = (value) => {
-    if (!value || typeof value !== 'string') return '';
-    const trimmed = value.trim().toLowerCase();
-    if (trimmed === 'white') return 'ffffff';
-    let hex = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
-    if (hex.length === 3) {
-      hex = hex.split('').map((c) => c + c).join('');
-    }
-    if (!/^[0-9a-f]{6}$/.test(hex)) return '';
-    return hex;
-  };
-
-  const isWhiteColor = (value) => normalizeHexColor(value) === 'ffffff';
-
-  const getStatusColor = (status) => {
-    const color = statusColors[status] || '#a1a1aa';
-    const textColor = isWhiteColor(color) ? '#000000' : '#ffffff';
-    
-    return {
-      backgroundColor: color,
-      color: textColor
-    };
-  };
-
-  const getStatusText = (status) => {
-    const texts = {
-      [TimeRecordStatus.ON_TIME]: 'No horário',
-      [TimeRecordStatus.LATE]: 'Atrasado',
-      [TimeRecordStatus.LATE_EXIT]: 'Saída após Horário',
-      [TimeRecordStatus.EARLY]: 'Antecipado',
-      [TimeRecordStatus.ADJUSTED]: 'Ajustado',
-    };
-    return texts[status] || 'Desconhecido';
-  };
-
-  const formatDateForExport = (value) => {
-    if (!value) return '';
-    if (typeof value !== 'string') return value;
-
-    const brDate = parse(value, 'dd/MM/yyyy', new Date());
-    if (isValid(brDate)) return format(brDate, 'dd/MM/yyyy');
-
-    const dashDate = parse(value, 'dd-MM-yyyy', new Date());
-    if (isValid(dashDate)) return format(dashDate, 'dd/MM/yyyy');
-
-    const isoDate = parseISO(value);
-    if (isValid(isoDate)) return format(isoDate, 'dd/MM/yyyy');
-
-    return value;
-  };
-
-  const formatTimeForSupabase = (timeStr) => {
-    if (!timeStr || typeof timeStr !== 'string') return null;
-    
-    // Remove asterisco e espaços
-    const cleanTime = timeStr.replace('*', '').trim();
-    if (!cleanTime) return null;
-    
-    // Verificar se é uma data (contém / ou -)
-    if (cleanTime.includes('/') || cleanTime.includes('-')) return null;
-    
-    // Verificar formato de hora (HH:MM ou HH:MM:SS)
-    const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])(:([0-5][0-9]))?$/;
-    if (!timeRegex.test(cleanTime)) return null;
-    
-    const parts = cleanTime.split(':');
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-    const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
-    
-    // Validar limites
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) {
-      return null;
-    }
-    
-    // Retornar no formato HH:MM:SS
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-  };
-
-  const parseTime = (timeStr) => {
-    if (!timeStr || typeof timeStr !== 'string') return null;
-    
-    // Remove asterisco se existir
-    const cleanTime = timeStr.replace('*', '').trim();
-    if (!cleanTime) return null;
-    
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return null;
-    
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-    const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
-    
-    // Validar se são números válidos
-    if (isNaN(hours) || isNaN(minutes) || isNaN(seconds)) return null;
-    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) return null;
-    
-    const d = new Date();
-    d.setHours(hours, minutes, seconds, 0);
-    return d;
-  };
-
-  // Função para extrair horários contratuais
-  const parseContractualHours = (contractualStr) => {
-    if (!contractualStr || typeof contractualStr !== 'string') return { entrada: null, saida: null };
-    
-    // Extrair todos os horários no formato HH:MM
-    const timeRegex = /(\d{1,2}:\d{2})/g;
-    const matches = contractualStr.match(timeRegex);
-    
-    if (!matches || matches.length === 0) return { entrada: null, saida: null };
-    
-    // Primeiro horário = entrada, último horário = saída
-    const entrada = formatTimeForSupabase(matches[0]);
-    const saida = formatTimeForSupabase(matches[matches.length - 1]);
-    
-    return { entrada, saida };
-  };
-
-  // Função para extrair horário de "Data e Hora da Batida"
-  const extractTimeFromDateTime = (dateTimeStr) => {
-    if (!dateTimeStr || typeof dateTimeStr !== 'string') return null;
-    
-    // Formato esperado: "21/07/2025 14:57"
-    const parts = dateTimeStr.trim().split(' ');
-    if (parts.length < 2) return null;
-    
-    // Pegar a parte do horário (última parte)
-    const timePart = parts[parts.length - 1];
-    
-    // Se contém asterisco, preservar no retorno
-    if (timePart.includes('*')) {
-      const cleanTime = timePart.replace('*', '').trim();
-      const formattedTime = formatTimeForSupabase(cleanTime);
-      return formattedTime ? formattedTime + '*' : null;
-    }
-    
-    return formatTimeForSupabase(timePart);
-  };
-
-  // Função para determinar o dia da semana de uma data
-  const getDayOfWeek = (dateStr) => {
-    if (!dateStr) return null;
-    
+  const loadRecords = async () => {
+    if (!user) return;
+    setLoading(true);
     try {
-      // Assumindo formato DD/MM/YYYY
-      const parts = dateStr.split('/');
-      if (parts.length !== 3) return null;
-      
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1; // JavaScript months are 0-indexed
-      const year = parseInt(parts[2], 10);
-      
-      const date = new Date(year, month, day);
-      return date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      const [{ records: pageRecords, count: total }, allFiltered] = await Promise.all([
+        fetchAttendancePage(user.id, appliedFilters, page, PAGE_SIZE),
+        fetchAllAttendance(user.id, appliedFilters),
+      ]);
+      setRecords(pageRecords);
+      setCount(total);
+      setSummaryRecords(allFiltered);
     } catch (error) {
-      return null;
+      toast({ title: 'Erro ao carregar registros', description: error.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getStatus = (contractual, actual, { isExit = false } = {}) => {
-    if (!actual || actual === '') return null;
-    
-    // Se tem asterisco (*), é ajustado
-    if (typeof actual === 'string' && actual.includes('*')) {
-      return TimeRecordStatus.ADJUSTED;
-    }
+  useEffect(() => { loadRecords(); }, [user, page, appliedFilters]);
 
-    if (!contractual || contractual === '') return null;
-    
-    const contractualTime = parseTime(contractual);
-    // Remove asterisco antes de fazer parse do horário
-    const cleanActual = typeof actual === 'string' ? actual.replace('*', '').trim() : actual;
-    const actualTime = parseTime(cleanActual);
+  const metrics = useMemo(() => {
+    const employees = new Set(summaryRecords.map((item) => `${item.flash_company_id || ''}:${item.flash_employee_id || item.employee_name}`)).size;
+    const onTime = summaryRecords.filter((item) => item.entry_status === TimeRecordStatus.ON_TIME).length;
+    const late = summaryRecords.filter((item) => item.entry_status === TimeRecordStatus.LATE).length;
+    const lateExit = summaryRecords.filter((item) => item.exit_status === TimeRecordStatus.LATE_EXIT).length;
+    const adjusted = summaryRecords.filter((item) => item.entry_status === TimeRecordStatus.ADJUSTED || item.exit_status === TimeRecordStatus.ADJUSTED).length;
+    const percentage = (value) => summaryRecords.length ? `${((value / summaryRecords.length) * 100).toFixed(1).replace('.', ',')}%` : '0,0%';
+    return { employees, total: summaryRecords.length, onTime, late, lateExit, adjusted, percentage };
+  }, [summaryRecords]);
 
-    if (!contractualTime || !actualTime) return null;
+  const activeChips = useMemo(() => {
+    const chips = [{ key: 'period', label: `Período: ${month.split('-').reverse().join('/')}` }];
+    if (appliedFilters.search) chips.push({ key: 'search', label: `Busca: ${appliedFilters.search}` });
+    if (appliedFilters.company !== 'all') chips.push({ key: 'company', label: `Empresa: ${appliedFilters.company}` });
+    if (appliedFilters.employee !== 'all') chips.push({ key: 'employee', label: `Colaborador: ${appliedFilters.employee}` });
+    if (appliedFilters.department !== 'all') chips.push({ key: 'department', label: `Departamento: ${appliedFilters.department}` });
+    if (appliedFilters.status !== 'all') chips.push({ key: 'status', label: `Status: ${STATUS_LABELS[appliedFilters.status]}` });
+    return chips;
+  }, [appliedFilters, month]);
 
-    const diffMinutes = (actualTime - contractualTime) / (1000 * 60);
-    const fallbackTolerance = Number.isFinite(timeSettings?.toleranceMinutes)
-      ? timeSettings.toleranceMinutes
-      : 5;
-    const onTimeTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.ON_TIME])
-      ? timeSettings[TimeRecordStatus.ON_TIME]
-      : fallbackTolerance;
-    const lateTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.LATE])
-      ? timeSettings[TimeRecordStatus.LATE]
-      : onTimeTolerance;
-    const lateExitTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.LATE_EXIT])
-      ? timeSettings[TimeRecordStatus.LATE_EXIT]
-      : lateTolerance;
-    const earlyTolerance = Number.isFinite(timeSettings?.[TimeRecordStatus.EARLY])
-      ? timeSettings[TimeRecordStatus.EARLY]
-      : onTimeTolerance;
-
-    const appliedLateTolerance = isExit ? lateExitTolerance : lateTolerance;
-    const lateStatus = isExit ? TimeRecordStatus.LATE_EXIT : TimeRecordStatus.LATE;
-
-    if (diffMinutes > appliedLateTolerance) {
-      return lateStatus;
-    }
-    if (diffMinutes < -earlyTolerance) {
-      return TimeRecordStatus.EARLY;
-    }
-    if (Math.abs(diffMinutes) <= onTimeTolerance) {
-      return TimeRecordStatus.ON_TIME;
-    }
-    return diffMinutes > 0 ? lateStatus : TimeRecordStatus.EARLY;
+  const clearOne = (key) => {
+    if (key === 'period') return;
+    setFilters((old) => ({ ...old, [key]: key === 'search' ? '' : 'all' }));
   };
 
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet, {
-          raw: false,
-        });
-
-        if (
-          json.length === 0 ||
-          !('Nome' in json[0])
-        ) {
-          throw new Error(
-            "Formato de arquivo inválido. Verifique se a coluna 'Nome' está presente."
-          );
-        }
-
-        const processedRecords = json.map((row, index) => {
-          // Extrair data da "Data e Hora da Batida 1" ou usar data atual como fallback
-          let parsedDate;
-          let dateStr = '';
-          
-          if (row['Data e Hora da Batida 1']) {
-            const dateTimeParts = row['Data e Hora da Batida 1'].trim().split(' ');
-            dateStr = dateTimeParts[0]; // Primeira parte é a data
-          }
-          
-          try {
-            if (dateStr) {
-              parsedDate = parse(dateStr, 'dd/MM/yyyy', new Date());
-              if (isNaN(parsedDate.getTime())) {
-                throw new Error('Invalid date');
-              }
-            } else {
-              parsedDate = new Date();
-            }
-          } catch (error) {
-            parsedDate = new Date();
-          }
-
-          // Processar horários contratuais
-          const contractualHours = parseContractualHours(row['Horário contratual']);
-          
-          // Extrair horários das batidas
-          const entradaReal = extractTimeFromDateTime(row['Data e Hora da Batida 1']);
-          
-          // Determinar saída baseada no dia da semana
-          const dayOfWeek = getDayOfWeek(dateStr);
-          let saidaReal = null;
-          let forcedEarlyStatus = false;
-          
-          if (dayOfWeek === 6) { // Sábado
-            saidaReal = extractTimeFromDateTime(row['Data e Hora da Batida 2']);
-          } else if (dayOfWeek >= 1 && dayOfWeek <= 5) { // Segunda a Sexta
-            // Primeiro tenta Data e Hora da Batida 4
-            saidaReal = extractTimeFromDateTime(row['Data e Hora da Batida 4']);
-            
-            // Se estiver em branco, busca na Data e Hora da Batida 2
-            if (!saidaReal) {
-              saidaReal = extractTimeFromDateTime(row['Data e Hora da Batida 2']);
-              // Se encontrou na Batida 2, marca como antecipado
-              if (saidaReal) {
-                forcedEarlyStatus = true;
-              }
-            }
-          }
-          
-          // Calcular status
-          const entryStatus = getStatus(
-            contractualHours.entrada,
-            entradaReal
-          );
-          
-          let exitStatus;
-          if (forcedEarlyStatus) {
-            // Forçar status antecipado quando usar Batida 2 em dia de semana
-            exitStatus = TimeRecordStatus.EARLY;
-          } else {
-            exitStatus = getStatus(
-              contractualHours.saida,
-              saidaReal,
-              { isExit: true }
-            );
-          }
-
-          return {
-            id: uuidv4(),
-            user_id: user?.id,
-            nome: row['Nome'],
-            departamento: row['Departamento'],
-            localizacao: row['Localização'] || '',
-            equipamento: row['Equipamento da Última Batida'] || '',
-            entrada_contratual: contractualHours.entrada,
-            saida_contratual: contractualHours.saida,
-            data_batida: parsedDate.toISOString().split('T')[0], // Store as YYYY-MM-DD format
-            entrada_real: entradaReal,
-            saida_real: saidaReal,
-            status_entrada: entryStatus,
-            status_saida: exitStatus,
-          };
-        });
-
-        const { error } = await supabase
-          .from('ponto_registros')
-          .insert(processedRecords);
-
-        if (error) {
-          throw new Error(`Erro ao salvar no banco de dados: ${error.message}`);
-        }
-
-        setAllRecords((prev) => [...prev, ...processedRecords]);
-
-        toast({
-          title: 'Upload bem-sucedido!',
-          description: `${json.length} registros foram processados e salvos.`,
-        });
-      } catch (error) {
-        toast({
-          title: 'Erro no Upload',
-          description:
-            error.message || 'Não foi possível processar o arquivo XLSX.',
-          variant: 'destructive',
-        });
-      } finally {
-        event.target.value = '';
-      }
-    };
-    reader.readAsArrayBuffer(file);
+  const clearFilters = () => {
+    const range = monthRange(month);
+    setFilters({ ...range, search: '', company: 'all', employee: 'all', department: 'all', status: 'all' });
   };
 
-  const handleDownload = () => {
-    const downloadExcelWithColors = async () => {
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      const range = monthRange(month);
+      const result = await importAttendanceFromFlash(range.startDate, range.endDate);
+      toast({ title: 'Dados atualizados', description: `${result.recordsProcessed || 0} registros processados em ${result.companiesProcessed || 0} empresas.` });
+      if (user) setOptions(await fetchFilterOptions(user.id));
+      await loadRecords();
+    } catch (error) {
+      toast({ title: 'Falha na atualização', description: error.message, variant: 'destructive' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!user) return;
+    setExporting(true);
+    try {
+      const allRecords = await fetchAllAttendance(user.id, appliedFilters);
+      const excelModule = await import('exceljs');
+      const ExcelJS = excelModule.default || excelModule;
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('Registros');
-
-      // Define headers
-      const headers = [
-        'Nome',
-        'Departamento', 
-        'Localização',
-        'Equipamento',
-        'Entrada Contratual',
-        'Saida Contratual',
-        'Data da batida',
-        'Entrada',
-        'Saída',
-        'STATUS ENTRADA',
-        'STATUS SAIDA'
+      worksheet.columns = [
+        { header: 'Data', key: 'date', width: 13 },
+        { header: 'Empresa', key: 'company', width: 36 },
+        { header: 'Colaborador', key: 'employee', width: 30 },
+        { header: 'Departamento', key: 'department', width: 24 },
+        { header: 'Entrada prevista', key: 'scheduledEntry', width: 18 },
+        { header: 'Entrada real', key: 'actualEntry', width: 15 },
+        { header: 'Saída prevista', key: 'scheduledExit', width: 18 },
+        { header: 'Saída real', key: 'actualExit', width: 15 },
+        { header: 'Status entrada', key: 'entryStatus', width: 22 },
+        { header: 'Status saída', key: 'exitStatus', width: 22 },
       ];
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FF065F2F' } };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFFBE8' } };
 
-      // Add headers
-      worksheet.addRow(headers);
-
-      // Style headers
-      const headerRow = worksheet.getRow(1);
-      headerRow.font = { bold: true };
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
-      };
-
-      // Add data rows
-      filteredRecords.forEach((record, index) => {
-        const rowData = [
-          record.nome,
-          record.departamento,
-          record.localizacao,
-          record.equipamento,
-          record.entrada_contratual,
-          record.saida_contratual,
-          formatDateForExport(record.data_batida),
-          record.entrada_real,
-          record.saida_real,
-          getStatusText(record.status_entrada),
-          getStatusText(record.status_saida)
-        ];
-
-        const row = worksheet.addRow(rowData);
-        const rowIndex = index + 2; // +2 because Excel is 1-indexed and we have headers
-
-        // Apply colors to time columns based on status
-        // Entrada column (column 8)
-        if (record.status_entrada && record.entrada_real) {
-          const entradaCell = worksheet.getCell(rowIndex, 8);
-          const entradaColor = statusColors[record.status_entrada];
-          if (entradaColor) {
-            entradaCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FF' + entradaColor.replace('#', '') }
-            };
-            // Add black text for white background
-            if (isWhiteColor(entradaColor)) {
-              entradaCell.font = { color: { argb: 'FF000000' } };
-              entradaCell.border = {
-                top: { style: 'thin', color: { argb: 'FF000000' } },
-                left: { style: 'thin', color: { argb: 'FF000000' } },
-                bottom: { style: 'thin', color: { argb: 'FF000000' } },
-                right: { style: 'thin', color: { argb: 'FF000000' } }
-              };
-            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(entradaColor)) {
-              // Add white text for better contrast on dark backgrounds
-              entradaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
-          }
-        }
-
-        // Saída column (column 9)
-        if (record.status_saida && record.saida_real) {
-          const saidaCell = worksheet.getCell(rowIndex, 9);
-          const saidaColor = statusColors[record.status_saida];
-          if (saidaColor) {
-            saidaCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FF' + saidaColor.replace('#', '') }
-            };
-            // Add black text for white background
-            if (isWhiteColor(saidaColor)) {
-              saidaCell.font = { color: { argb: 'FF000000' } };
-              saidaCell.border = {
-                top: { style: 'thin', color: { argb: 'FF000000' } },
-                left: { style: 'thin', color: { argb: 'FF000000' } },
-                bottom: { style: 'thin', color: { argb: 'FF000000' } },
-                right: { style: 'thin', color: { argb: 'FF000000' } }
-              };
-            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(saidaColor)) {
-              // Add white text for better contrast on dark backgrounds
-              saidaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
-          }
-        }
-
-        // Apply colors to status columns as well
-        // STATUS ENTRADA column (column 10)
-        if (record.status_entrada) {
-          const statusEntradaCell = worksheet.getCell(rowIndex, 10);
-          const entradaColor = statusColors[record.status_entrada];
-          if (entradaColor) {
-            statusEntradaCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FF' + entradaColor.replace('#', '') }
-            };
-            // Add black text for white background
-            if (isWhiteColor(entradaColor)) {
-              statusEntradaCell.font = { color: { argb: 'FF000000' } };
-              statusEntradaCell.border = {
-                top: { style: 'thin', color: { argb: 'FF000000' } },
-                left: { style: 'thin', color: { argb: 'FF000000' } },
-                bottom: { style: 'thin', color: { argb: 'FF000000' } },
-                right: { style: 'thin', color: { argb: 'FF000000' } }
-              };
-            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(entradaColor)) {
-              statusEntradaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
-          }
-        }
-
-        // STATUS SAIDA column (column 11)
-        if (record.status_saida) {
-          const statusSaidaCell = worksheet.getCell(rowIndex, 11);
-          const saidaColor = statusColors[record.status_saida];
-          if (saidaColor) {
-            statusSaidaCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FF' + saidaColor.replace('#', '') }
-            };
-            // Add black text for white background
-            if (isWhiteColor(saidaColor)) {
-              statusSaidaCell.font = { color: { argb: 'FF000000' } };
-              statusSaidaCell.border = {
-                top: { style: 'thin', color: { argb: 'FF000000' } },
-                left: { style: 'thin', color: { argb: 'FF000000' } },
-                bottom: { style: 'thin', color: { argb: 'FF000000' } },
-                right: { style: 'thin', color: { argb: 'FF000000' } }
-              };
-            } else if (['#ef4444', '#f59e0b', '#f97316'].includes(saidaColor)) {
-              statusSaidaCell.font = { color: { argb: 'FFFFFFFF' } };
-            }
-          }
-        }
-      });
-
-      // Auto-fit columns
-      worksheet.columns.forEach(column => {
-        let maxLength = 0;
-        column.eachCell({ includeEmpty: true }, (cell) => {
-          const columnLength = cell.value ? cell.value.toString().length : 10;
-          if (columnLength > maxLength) {
-            maxLength = columnLength;
-          }
+      allRecords.forEach((record) => {
+        const row = worksheet.addRow({
+          date: formatDate(record.work_date), company: record.company_name || '', employee: record.employee_name, department: record.department || '',
+          scheduledEntry: formatTime(record.scheduled_entry), actualEntry: formatTime(record.actual_entry),
+          scheduledExit: formatTime(record.scheduled_exit), actualExit: formatTime(record.actual_exit),
+          entryStatus: STATUS_LABELS[record.entry_status] || '', exitStatus: STATUS_LABELS[record.exit_status] || '',
         });
-        column.width = maxLength < 10 ? 10 : maxLength + 2;
+        [[9, record.entry_status], [10, record.exit_status]].forEach(([column, status]) => {
+          if (!status) return;
+          const hex = (settings.colors[status] || '#94a3b8').replace('#', '').toUpperCase();
+          const cell = row.getCell(column);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${hex}` } };
+          cell.font = { color: { argb: 'FFFFFFFF' } };
+        });
       });
 
-      // Generate buffer and download
       const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      });
-      
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'registros_de_ponto.xlsx';
-      link.click();
-      window.URL.revokeObjectURL(url);
-    };
-
-    downloadExcelWithColors().catch(error => {
-      console.error('Erro ao gerar relatório com cores:', error);
-      toast({
-        title: 'Erro no download',
-        description: 'Não foi possível gerar o relatório com cores. Tente novamente.',
-        variant: 'destructive',
-      });
-    });
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `registros_${appliedFilters.startDate}_${appliedFilters.endDate}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: 'Erro na exportação', description: error.message, variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const handleDownloadTemplate = () => {
-    const templateData = [
-      {
-        Nome: 'Exemplo Usuário',
-        Matrícula: '12345',
-        Pis: '12345678901',
-        CPF: '123.456.789-00',
-        'Código Interno': 'INT001',
-        'Data de Admissão': '01/01/2023',
-        'Data de Nascimento': '15/05/1990',
-        Cargo: 'Analista',
-        Departamento: 'TI',
-        Filial: 'Matriz',
-        'Regime de trabalho': 'CLT',
-        'Centro de Custo': '001',
-        Localização: 'Sede',
-        'Equipamento da Última Batida': 'REP001',
-        centro_custo_desc: 'Tecnologia da Informação',
-        'Data de Demissão': '',
-        'Data Lógica': '21/07/2025',
-        'Data da Batida': '21/07/2025',
-        'Tipo da Batida': 'Normal',
-        Latitude: '-23.550520',
-        Longitude: '-46.633308',
-        Precisão: '10',
-        'Escala/Jornala': 'Padrão',
-        'Horário contratual': '08:00 - 12:00 - 13:00 - 17:00',
-        'Data e Hora da Batida 1': '21/07/2025 08:02',
-        'Data e Hora da Batida 2': '21/07/2025 12:00',
-        'Data e Hora da Batida 3': '21/07/2025 13:00',
-        'Data e Hora da Batida 4': '21/07/2025 17:05',
-        'Data e Hora da Batida 5': '',
-      },
-    ];
-    const worksheet = XLSX.utils.json_to_sheet(templateData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Novo Modelo');
-    XLSX.writeFile(workbook, 'novo_modelo_registros.xlsx');
-  };
-
-  const summary = useMemo(() => {
-    let onTime = 0;
-    let late = 0;
-    let lateExit = 0;
-    let early = 0;
-    let adjusted = 0;
-
-    filteredRecords.forEach((record) => {
-      // Contar status de entrada
-      if (record.status_entrada === TimeRecordStatus.ON_TIME) onTime++;
-      else if (record.status_entrada === TimeRecordStatus.LATE) late++;
-      else if (record.status_entrada === TimeRecordStatus.EARLY) early++;
-      else if (record.status_entrada === TimeRecordStatus.ADJUSTED) adjusted++;
-
-      // Contar status de saída
-      if (record.status_saida === TimeRecordStatus.ON_TIME) onTime++;
-      else if (record.status_saida === TimeRecordStatus.LATE_EXIT) lateExit++;
-      else if (record.status_saida === TimeRecordStatus.LATE) lateExit++;
-      else if (record.status_saida === TimeRecordStatus.EARLY) early++;
-      else if (record.status_saida === TimeRecordStatus.ADJUSTED) adjusted++;
-    });
-
-    return { total: filteredRecords.length, onTime, late, lateExit, early, adjusted };
-  }, [filteredRecords]);
-
-  const handleFilterClick = (status) => {
-    setActiveFilters((prev) => {
-      const newFilters = new Set(prev);
-      
-      if (status === 'all') {
-        // Se clicar em "Total", limpar todos os outros filtros
-        return new Set(['all']);
-      }
-      
-      // Remove 'all' se existir
-      newFilters.delete('all');
-      
-      if (newFilters.has(status)) {
-        // Se o status já está selecionado, remove
-        newFilters.delete(status);
-        
-        // Se não sobrou nenhum filtro, volta para 'all'
-        if (newFilters.size === 0) {
-          newFilters.add('all');
-        }
-      } else {
-        // Adiciona o novo status
-        newFilters.add(status);
-      }
-      
-      return newFilters;
-    });
-  };
-
-  const handleClearRecords = () => {
-    setAllRecords([]);
-    localStorage.removeItem('timeControlRecords');
-    toast({ title: 'Registros limpos da tela.' });
-  };
-
-  // Obter listas únicas para os filtros
-  const uniqueNames = useMemo(() => {
-    const names = [...new Set(allRecords.map(record => record.nome))];
-    return names.sort();
-  }, [allRecords]);
-
-  const uniqueDepartments = useMemo(() => {
-    const departments = [...new Set(allRecords.map(record => record.departamento))];
-    return departments.sort();
-  }, [allRecords]);
-
-  const handleApplyFilters = () => {
-    setFilterDialogOpen(false);
-    toast({
-      title: 'Filtros aplicados',
-      description: 'Os registros foram filtrados conforme sua seleção.',
-    });
-  };
-
-  const handleClearFilters = () => {
-    setNameFilter('all');
-    setDepartmentFilter('all');
-    toast({
-      title: 'Filtros limpos',
-      description: 'Todos os filtros foram removidos.',
-    });
-  };
-
-  const handleApplyDateRange = () => {
-    setHasDateFilter(true);
-    setPeriodDialogOpen(false);
-    toast({
-      title: 'Período aplicado',
-      description: `Registros filtrados de ${format(dateRange[0].startDate, 'dd/MM/yyyy')} até ${format(dateRange[0].endDate, 'dd/MM/yyyy')}.`,
-    });
-  };
-
-  const handleClearDateRange = () => {
-    setHasDateFilter(false);
-    setDateRange([{
-      startDate: new Date(),
-      endDate: new Date(),
-      key: 'selection'
-    }]);
-    toast({
-      title: 'Período removido',
-      description: 'O filtro de período foi removido.',
-    });
-  };
+  const pageItems = useMemo(() => {
+    const items = [];
+    const start = Math.max(1, page - 2);
+    const end = Math.min(totalPages, page + 2);
+    for (let value = start; value <= end; value += 1) items.push(value);
+    return items;
+  }, [page, totalPages]);
 
   return (
     <>
-      <Helmet>
-        <title>Registros - Controle de Ponto</title>
-        <meta
-          name="description"
-          content="Visualize e gerencie registros de ponto, faça upload de arquivos XLSX e baixe relatórios."
-        />
-      </Helmet>
-
+      <Helmet><title>Registros | Controle de Ponto</title></Helmet>
       <Layout>
-        <div className="space-y-8">
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <h1 className="text-3xl font-bold text-gray-900">
-              Registros de Ponto
-            </h1>
-            <p className="text-gray-600 mt-2">
-              Gerencie e visualize todos os registros de ponto importados.
-            </p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="space-y-4"
-          >
-            {/* Barra de busca e filtros */}
-            <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-start">
-              <div className="relative flex-1 sm:min-w-[250px] sm:max-w-md">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Buscar por nome, depto, etc..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-
-              <div className="flex gap-2 sm:gap-4">
-                {/* Filtros Dialog */}
-                <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={`flex items-center gap-2 flex-1 sm:flex-none justify-center ${
-                        nameFilter !== 'all' || departmentFilter !== 'all' 
-                          ? 'bg-primary-50 border-primary-200 text-primary-700' 
-                          : ''
-                      }`}
-                    >
-                      <Filter className="w-4 h-4" /> 
-                      Filtros
-                      {(nameFilter !== 'all' || departmentFilter !== 'all') && (
-                        <span className="bg-primary-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
-                          {(nameFilter !== 'all' ? 1 : 0) + (departmentFilter !== 'all' ? 1 : 0)}
-                        </span>
-                      )}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Filtrar Registros</DialogTitle>
-                      <DialogDescription>
-                        Selecione os filtros para refinar a visualização dos registros.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="name-filter">Filtrar por Nome</Label>
-                        <Select value={nameFilter} onValueChange={setNameFilter}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um nome" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todos os nomes</SelectItem>
-                            {uniqueNames.map((name) => (
-                              <SelectItem key={name} value={name}>
-                                {name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="department-filter">Filtrar por Departamento</Label>
-                        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um departamento" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todos os departamentos</SelectItem>
-                            {uniqueDepartments.map((dept) => (
-                              <SelectItem key={dept} value={dept}>
-                                {dept}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="flex gap-2 pt-4">
-                        <Button onClick={handleClearFilters} variant="outline" className="flex-1">
-                          Limpar
-                        </Button>
-                        <Button onClick={handleApplyFilters} className="flex-1">
-                          Aplicar
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-
-                {/* Período Dialog */}
-                <Dialog open={periodDialogOpen} onOpenChange={setPeriodDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={`flex items-center gap-2 flex-1 sm:flex-none justify-center ${
-                        hasDateFilter 
-                          ? 'bg-primary-50 border-primary-200 text-primary-700' 
-                          : ''
-                      }`}
-                    >
-                      <Calendar className="w-4 h-4" /> 
-                      Período
-                      {hasDateFilter && (
-                        <span className="bg-primary-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center">
-                          1
-                        </span>
-                      )}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-lg">
-                    <DialogHeader>
-                      <DialogTitle>Filtrar por Período</DialogTitle>
-                      <DialogDescription>
-                        Selecione um intervalo de datas para filtrar os registros.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="flex justify-center">
-                        <DateRange
-                          editableDateInputs={true}
-                          onChange={item => setDateRange([item.selection])}
-                          moveRangeOnFirstSelection={false}
-                          ranges={dateRange}
-                          locale={{
-                            localize: {
-                              day: n => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][n],
-                              month: n => ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][n]
-                            },
-                            formatLong: {},
-                            code: 'pt-BR'
-                          }}
-                        />
-                      </div>
-
-                      {hasDateFilter && (
-                        <div className="text-sm text-gray-600 text-center">
-                          Período atual: {format(dateRange[0].startDate, 'dd/MM/yyyy')} até {format(dateRange[0].endDate, 'dd/MM/yyyy')}
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 pt-4">
-                        <Button onClick={handleClearDateRange} variant="outline" className="flex-1">
-                          Limpar
-                        </Button>
-                        <Button onClick={handleApplyDateRange} className="flex-1">
-                          Aplicar
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </div>
-
-            {/* Botões de ação */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-start">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                className="hidden"
-                accept=".xlsx, .xls"
-              />
-              <Button
-                onClick={() => fileInputRef.current.click()}
-                className="bg-secondary-500 hover:bg-secondary-600 text-white justify-center"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Upload XLSX
-              </Button>
-              <Button onClick={handleDownload} variant="outline" className="justify-center">
-                <Download className="w-4 h-4 mr-2" />
-                Baixar Relatório
-              </Button>
-              <Button onClick={handleDownloadTemplate} variant="outline" className="justify-center">
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Modelo XLSX
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="destructive"
-                    disabled={allRecords.length === 0}
-                    className="justify-center"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Limpar Registros
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esta ação limpará todos os registros da tela. Os dados
-                      permanecerão salvos no banco de dados.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleClearRecords}>
-                      Confirmar
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-6"
-          >
-            <div className="min-w-0">
-              <MetricCard
-                title="Total"
-                value={summary.total}
-                icon={Clock}
-                color={activeFilters.has('all') ? "primary" : "secondary"}
-                onClick={() => handleFilterClick('all')}
-                clickable
-              />
-            </div>
-            <div className="min-w-0">
-              <MetricCard
-                title="No Horário"
-                value={summary.onTime}
-                icon={Clock}
-                color={activeFilters.has(TimeRecordStatus.ON_TIME) ? "success" : "secondary"}
-                onClick={() => handleFilterClick(TimeRecordStatus.ON_TIME)}
-                clickable
-              />
-            </div>
-            <div className="min-w-0">
-              <MetricCard
-                title="Atrasos"
-                value={summary.late}
-                icon={AlertTriangle}
-                color={activeFilters.has(TimeRecordStatus.LATE) ? "danger" : "secondary"}
-                onClick={() => handleFilterClick(TimeRecordStatus.LATE)}
-                clickable
-              />
-            </div>
-            <div className="min-w-0">
-              <MetricCard
-                title="Saída após Horário"
-                value={summary.lateExit}
-                icon={Clock}
-                color={activeFilters.has(TimeRecordStatus.LATE_EXIT) ? "warning" : "secondary"}
-                onClick={() => handleFilterClick(TimeRecordStatus.LATE_EXIT)}
-                clickable
-              />
-            </div>
-            <div className="min-w-0">
-              <MetricCard
-                title="Antecipados"
-                value={summary.early}
-                icon={Clock}
-                color={activeFilters.has(TimeRecordStatus.EARLY) ? "primary" : "secondary"}
-                onClick={() => handleFilterClick(TimeRecordStatus.EARLY)}
-                clickable
-              />
-            </div>
-            <div className="min-w-0">
-              <MetricCard
-                title="Ajustados"
-                value={summary.adjusted}
-                icon={Clock}
-                color={activeFilters.has(TimeRecordStatus.ADJUSTED) ? "warning" : "secondary"}
-                onClick={() => handleFilterClick(TimeRecordStatus.ADJUSTED)}
-                clickable
-              />
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Visualização de Registros ({filteredRecords.length})
-                  {!activeFilters.has('all') && activeFilters.size > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {Array.from(activeFilters).map(status => (
-                        <span key={status} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
-                          {status === TimeRecordStatus.ON_TIME ? 'No Horário' :
-                           status === TimeRecordStatus.LATE ? 'Atrasos' :
-                           status === TimeRecordStatus.LATE_EXIT ? 'Saída após Horário' :
-                           status === TimeRecordStatus.EARLY ? 'Antecipados' :
-                           status === TimeRecordStatus.ADJUSTED ? 'Ajustados' : status}
-                          <button 
-                            onClick={() => handleFilterClick(status)} 
-                            className="hover:bg-primary-200 rounded-full p-0.5"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {(nameFilter !== 'all' || departmentFilter !== 'all' || hasDateFilter) && (
-                    <div className="flex gap-2 mt-2">
-                      {nameFilter !== 'all' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
-                          Nome: {nameFilter}
-                          <button onClick={() => setNameFilter('all')} className="hover:bg-primary-200 rounded-full p-0.5">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      )}
-                      {departmentFilter !== 'all' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
-                          Depto: {departmentFilter}
-                          <button onClick={() => setDepartmentFilter('all')} className="hover:bg-primary-200 rounded-full p-0.5">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      )}
-                      {hasDateFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
-                          {format(dateRange[0].startDate, 'dd/MM')} - {format(dateRange[0].endDate, 'dd/MM')}
-                          <button onClick={handleClearDateRange} className="hover:bg-primary-200 rounded-full p-0.5">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </CardTitle>
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="page-size" className="text-sm text-gray-600">Registros por página</Label>
-                    <Select
-                      value={String(pageSize)}
-                      onValueChange={(value) => {
-                        const nextSize = parseInt(value, 10);
-                        if (!isNaN(nextSize)) {
-                          setPageSize(nextSize);
-                        }
-                      }}
-                    >
-                      <SelectTrigger id="page-size" className="w-[80px]">
-                        <SelectValue placeholder="Selecione..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {pageSizeOptions.map((size) => (
-                          <SelectItem key={size} value={String(size)}>
-                            {size}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-gray-600">
-                      Mostrando {pageStart}-{pageEnd} de {filteredRecords.length}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                      disabled={currentPage === totalPages}
-                    >
-                      Próxima
-                    </Button>
-                    <span className="text-sm text-gray-500">
-                      Página {currentPage} de {totalPages}
-                    </span>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto -mx-6 sm:mx-0">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[120px]">
-                          Nome
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[100px] hidden sm:table-cell">
-                          Departamento
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[100px] hidden md:table-cell">
-                          Data
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[120px]">
-                          Entrada
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[100px] hidden lg:table-cell">
-                          Status Entrada
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[120px] hidden xl:table-cell">
-                          Saída
-                        </th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 min-w-[100px] hidden xl:table-cell">
-                          Status Saída
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRecords.length > 0 ? (
-                        paginatedRecords.map((record, index) => (
-                          <motion.tr
-                            key={record.id}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ duration: 0.3, delay: index * 0.02 }}
-                            className="border-b border-gray-100 hover:bg-gray-50 dark:hover:bg-gray-900"
-                          >
-                            <td className="py-4 px-4">
-                              <div>
-                                <div className="font-medium text-gray-900">
-                                  {record.nome}
-                                </div>
-                                <div className="text-sm text-gray-500 sm:hidden">
-                                  {record.departamento}
-                                </div>
-                                <div className="text-sm text-gray-500 md:hidden">
-                                  {record.data_batida && isValid(parseISO(record.data_batida)) ? format(parseISO(record.data_batida), 'dd/MM/yyyy') : '-'}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 text-gray-600 hidden sm:table-cell">
-                              {record.departamento}
-                            </td>
-                            <td className="py-4 px-4 text-gray-600 hidden md:table-cell">
-                              {record.data_batida && isValid(parseISO(record.data_batida)) ? format(parseISO(record.data_batida), 'dd/MM/yyyy') : '-'}
-                            </td>
-                            <td className="py-4 px-4 text-sm">
-                              <div 
-                                className={`font-medium px-2 py-1 rounded ${record.status_entrada ? '' : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'}`}
-                                style={record.status_entrada ? getStatusColor(record.status_entrada) : undefined}
-                              >
-                                {record.entrada_real || record.entrada_contratual || '-'}
-                              </div>
-                              <div className="text-gray-500 text-xs">
-                                Previsto: {record.entrada_contratual || '-'}
-                              </div>
-                              <div className="lg:hidden mt-1">
-                                {record.status_entrada ? (
-                                  <span
-                                    className="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-                                    style={getStatusColor(record.status_entrada)}
-                                  >
-                                    {getStatusText(record.status_entrada)}
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
-                                    Sem status
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 hidden lg:table-cell">
-                              {record.status_entrada ? (
-                                <span
-                                  className="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-                                  style={getStatusColor(record.status_entrada)}
-                                >
-                                  {getStatusText(record.status_entrada)}
-                                </span>
-                              ) : (
-                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
-                                  Sem status
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-4 px-4 text-sm hidden xl:table-cell">
-                              <div 
-                                className={`font-medium px-2 py-1 rounded ${record.status_saida ? '' : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100'}`}
-                                style={record.status_saida ? getStatusColor(record.status_saida) : undefined}
-                              >
-                                {record.saida_real || 'S/R'}
-                              </div>
-                              <div className="text-gray-500 text-xs">
-                                Previsto: {record.saida_contratual || '-'}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 hidden xl:table-cell">
-                              {record.status_saida ? (
-                                <span
-                                  className="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-                                  style={getStatusColor(record.status_saida)}
-                                >
-                                  {getStatusText(record.status_saida)}
-                                </span>
-                              ) : (
-                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-200">
-                                  Sem status
-                                </span>
-                              )}
-                            </td>
-                          </motion.tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td
-                            colSpan="7"
-                            className="text-center py-10 text-gray-500"
-                          >
-                            Nenhum registro encontrado. Tente fazer um upload ou
-                            limpar os filtros.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-[#173c2c] dark:text-slate-50">Registros</h1>
+            <p className="mt-1 text-sm text-[#73877b] dark:text-slate-400">Consulte e gerencie os registros de ponto importados via API</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className={FIELD} style={{ width: 160 }} />
+            <button onClick={handleImport} disabled={importing} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#57D100] px-5 text-sm font-semibold text-[#064E2C] shadow-sm transition hover:bg-[#4bc000] disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${importing ? 'animate-spin' : ''}`}/>{importing ? 'Atualizando...' : 'Atualizar dados da API'}</button>
+            <button onClick={handleExport} disabled={exporting || count === 0} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#cfe0c5] bg-white px-5 text-sm font-semibold text-[#365b42] transition hover:bg-[#f7fbf4] disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"><Download className="h-4 w-4"/>{exporting ? 'Exportando...' : 'Exportar Excel'}</button>
+          </div>
         </div>
+
+        <ApiBanner />
+
+        <section className={`${CARD} mt-4 p-4`}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[1.1fr_1fr_1fr_1fr_1fr_auto]">
+            <label><span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#425c4e] dark:text-slate-300"><Search className="h-4 w-4"/>Buscar</span><input value={filters.search} onChange={(event) => setFilters((old) => ({ ...old, search: event.target.value }))} placeholder="Digite o nome do colaborador..." className={FIELD}/></label>
+            <label><span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#425c4e] dark:text-slate-300"><Building className="h-4 w-4"/>Empresa</span><select value={filters.company} onChange={(event) => setFilters((old) => ({ ...old, company: event.target.value }))} className={FIELD}><option value="all">Todas as empresas</option>{options.companies.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+            <label><span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#425c4e] dark:text-slate-300"><Users className="h-4 w-4"/>Colaborador</span><select value={filters.employee} onChange={(event) => setFilters((old) => ({ ...old, employee: event.target.value }))} className={FIELD}><option value="all">Todos os colaboradores</option>{options.employees.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+            <label><span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#425c4e] dark:text-slate-300"><FileText className="h-4 w-4"/>Departamento</span><select value={filters.department} onChange={(event) => setFilters((old) => ({ ...old, department: event.target.value }))} className={FIELD}><option value="all">Todos os departamentos</option>{options.departments.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+            <label><span className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#425c4e] dark:text-slate-300"><Clock3 className="h-4 w-4"/>Status</span><select value={filters.status} onChange={(event) => setFilters((old) => ({ ...old, status: event.target.value }))} className={FIELD}><option value="all">Todos os status</option>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></label>
+            <button onClick={clearFilters} className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#cfe0c5] px-4 text-sm font-semibold text-[#2f8f17] transition hover:bg-[#f7fbf4] dark:border-slate-700 dark:text-emerald-300 dark:hover:bg-slate-800"><Settings className="h-4 w-4"/>Limpar filtros</button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <strong className="mr-1 text-[#425c4e] dark:text-slate-300">Filtros ativos:</strong>
+            {activeChips.map((chip) => <button key={chip.key} onClick={() => clearOne(chip.key)} className="rounded-full bg-[#eaf8df] px-3 py-1.5 text-[#2f8f17] dark:bg-emerald-950/70 dark:text-emerald-300">{chip.label}{chip.key !== 'period' ? '  ×' : ''}</button>)}
+          </div>
+        </section>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <MetricCard icon={Users} label="Colaboradores" value={metrics.employees} helper="no filtro atual" color="#2f8f17" />
+          <MetricCard icon={FileText} label="Registros" value={metrics.total.toLocaleString('pt-BR')} helper="no filtro atual" color="#57D100" />
+          <MetricCard icon={Clock3} label="No horário" value={metrics.onTime.toLocaleString('pt-BR')} helper={metrics.percentage(metrics.onTime)} color={settings.colors[TimeRecordStatus.ON_TIME]} />
+          <MetricCard icon={AlertCircle} label="Atrasados" value={metrics.late.toLocaleString('pt-BR')} helper={metrics.percentage(metrics.late)} color={settings.colors[TimeRecordStatus.LATE]} />
+          <MetricCard icon={RefreshCw} label="Saída após horário" value={metrics.lateExit.toLocaleString('pt-BR')} helper={metrics.percentage(metrics.lateExit)} color={settings.colors[TimeRecordStatus.LATE_EXIT]} />
+          <MetricCard icon={Pencil} label="Ajustados" value={metrics.adjusted.toLocaleString('pt-BR')} helper={metrics.percentage(metrics.adjusted)} color={settings.colors[TimeRecordStatus.ADJUSTED]} />
+        </div>
+
+        <section className={`${CARD} mt-4 overflow-hidden`}>
+          <div className="flex items-center gap-3 border-b border-[#edf3e9] px-5 py-4 dark:border-slate-800">
+            <FileText className="h-5 w-5 text-[#57D100]"/>
+            <div><h2 className="text-lg font-semibold text-[#173c2c] dark:text-slate-100">Registros de ponto</h2><p className="text-xs text-slate-500">Mostrando {count === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} a {Math.min(page * PAGE_SIZE, count)} de {count.toLocaleString('pt-BR')} registros (filtros aplicados)</p></div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1320px] text-sm">
+              <thead className="bg-[#f7fbf4] text-left text-xs text-[#63776b] dark:bg-slate-950 dark:text-slate-400"><tr><th className="px-5 py-3">Empresa</th><th className="px-5 py-3">Nome</th><th className="px-5 py-3">Departamento</th><th className="px-5 py-3">Data</th><th className="px-5 py-3">Entrada prevista</th><th className="px-5 py-3">Entrada real</th><th className="px-5 py-3">Saída prevista</th><th className="px-5 py-3">Saída real</th><th className="px-5 py-3">Status entrada</th><th className="px-5 py-3">Status saída</th></tr></thead>
+              <tbody>
+                {!loading && records.map((record) => <tr key={record.id} className="border-t border-[#edf3e9] dark:border-slate-800"><td className="px-5 py-3 text-xs font-medium text-[#065F2F] dark:text-emerald-300">{record.company_name || '—'}</td><td className="px-5 py-3 font-medium text-[#294436] dark:text-slate-200">{record.employee_name}</td><td className="px-5 py-3 text-slate-500">{record.department || '—'}</td><td className="px-5 py-3 text-slate-500">{formatDate(record.work_date)}</td><td className="px-5 py-3">{formatTime(record.scheduled_entry)}</td><td className="px-5 py-3">{formatTime(record.actual_entry)}</td><td className="px-5 py-3">{formatTime(record.scheduled_exit)}</td><td className="px-5 py-3">{formatTime(record.actual_exit)}</td><td className="px-5 py-3"><StatusBadge status={record.entry_status} colors={settings.colors}/></td><td className="px-5 py-3"><StatusBadge status={record.exit_status} colors={settings.colors}/></td></tr>)}
+                {!loading && records.length === 0 && <tr><td colSpan="10" className="px-5 py-14 text-center text-slate-400">Nenhum registro encontrado para os filtros selecionados.</td></tr>}
+                {loading && <tr><td colSpan="10" className="px-5 py-14 text-center text-slate-400">Carregando...</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-[#edf3e9] px-5 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+            <span className="text-sm text-slate-500">Exibindo {count === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} a {Math.min(page * PAGE_SIZE, count)} de {count.toLocaleString('pt-BR')} registros</span>
+            <div className="flex items-center gap-1">
+              <button disabled={page === 1} onClick={() => setPage((value) => value - 1)} className="h-9 rounded-lg border border-[#d7e5cf] px-3 disabled:opacity-40 dark:border-slate-700">‹</button>
+              {pageItems.map((value) => <button key={value} onClick={() => setPage(value)} className={`h-9 min-w-9 rounded-lg border px-3 ${value === page ? 'border-[#57D100] bg-[#57D100] font-medium text-[#064E2C]' : 'border-[#d7e5cf] bg-white dark:border-slate-700 dark:bg-slate-900'}`}>{value}</button>)}
+              <button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)} className="h-9 rounded-lg border border-[#d7e5cf] px-3 disabled:opacity-40 dark:border-slate-700">›</button>
+            </div>
+          </div>
+        </section>
       </Layout>
     </>
   );
