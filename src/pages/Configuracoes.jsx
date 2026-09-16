@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { Building, Clock3, Info, RefreshCw, Save, Users } from 'lucide-react';
+import { Building, Clock3, RefreshCw, Save, Users } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
+import UsersSettings from '@/components/settings/UsersSettings';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useToast } from '@/components/ui/use-toast';
 import {
@@ -20,10 +21,12 @@ const STATUSES = [TimeRecordStatus.ON_TIME, TimeRecordStatus.LATE, TimeRecordSta
 const PANEL = 'rounded-2xl border border-[#dfe9d7] bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900';
 const FIELD = 'h-11 rounded-xl border border-[#cfe8bc] bg-white px-3 outline-none transition focus:border-[#57D100] focus:ring-2 focus:ring-[#57D100]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100';
 const CONFIG_TAB_KEY = 'controle-ponto:configuracoes:tab';
+const VALID_TABS = new Set(['general', 'flash', 'users']);
 
 const initialConfigTab = () => {
   if (typeof window === 'undefined') return 'general';
-  return window.sessionStorage.getItem(CONFIG_TAB_KEY) === 'flash' ? 'flash' : 'general';
+  const stored = window.sessionStorage.getItem(CONFIG_TAB_KEY);
+  return VALID_TABS.has(stored) ? stored : 'general';
 };
 
 const TARGET_UI = {
@@ -67,7 +70,9 @@ const SyncAction = ({ company, target, run, activeSync, onSync, dateTime }) => {
   const completed = run?.status === 'completed';
   const processed = Number(run?.current_company_employees_processed || 0);
   const total = Number(run?.current_company_employees_total || 0);
-  const progress = target === 'schedules' && total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : running ? 45 : completed ? 100 : 0;
+  const progress = target === 'schedules' && total > 0
+    ? Math.min(100, Math.round((processed / total) * 100))
+    : running ? 45 : completed ? 100 : 0;
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-[#e2ecdc] bg-[#fbfdf9] p-4 dark:border-slate-800 dark:bg-slate-950/55">
@@ -133,6 +138,16 @@ const SyncAction = ({ company, target, run, activeSync, onSync, dateTime }) => {
   );
 };
 
+const TabButton = ({ active, onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${active ? 'bg-[#57D100] text-[#064E2C]' : 'text-slate-500 hover:bg-[#f5faf1] dark:text-slate-400 dark:hover:bg-slate-800'}`}
+  >
+    {children}
+  </button>
+);
+
 const Configuracoes = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -165,7 +180,6 @@ const Configuracoes = () => {
         setSettings(loaded);
         setLatestImport(importRun);
         setSyncRuns(runs);
-
         const running = runs.find((run) => run.company_key && run.sync_target && isRecentRunning(run));
         if (running) setActiveSync({ companyKey: running.company_key, target: running.sync_target });
       })
@@ -205,9 +219,18 @@ const Configuracoes = () => {
     return map;
   }, [syncRuns]);
 
-  const updateTolerance = (status, value) => {
+  const updateTolerance = (status, side, value) => {
     const number = Math.max(0, Math.min(60, Number(value) || 0));
-    setSettings((old) => ({ ...old, tolerances: { ...old.tolerances, [status]: number } }));
+    setSettings((old) => ({
+      ...old,
+      statusTolerances: {
+        ...old.statusTolerances,
+        [status]: {
+          ...(old.statusTolerances?.[status] || { before: 0, after: 0 }),
+          [side]: number,
+        },
+      },
+    }));
   };
 
   const updateColor = (status, value) => setSettings((old) => ({ ...old, colors: { ...old.colors, [status]: value } }));
@@ -260,22 +283,13 @@ const Configuracoes = () => {
       <Layout>
         <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-semibold tracking-tight text-[#173c2c] dark:text-slate-50">Configurações</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie as regras do ponto e as integrações cadastrais da Flash.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie as regras do ponto, os usuários e as integrações cadastrais da Flash.</p>
         </div>
 
-        <div className="mt-6 inline-flex rounded-xl border border-[#dfe9d7] bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <button
-            onClick={() => setActiveTab('general')}
-            className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === 'general' ? 'bg-[#57D100] text-[#064E2C]' : 'text-slate-500 hover:bg-[#f5faf1] dark:text-slate-400 dark:hover:bg-slate-800'}`}
-          >
-            Geral
-          </button>
-          <button
-            onClick={() => setActiveTab('flash')}
-            className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === 'flash' ? 'bg-[#57D100] text-[#064E2C]' : 'text-slate-500 hover:bg-[#f5faf1] dark:text-slate-400 dark:hover:bg-slate-800'}`}
-          >
-            Estrutura Flash
-          </button>
+        <div className="mt-6 inline-flex flex-wrap rounded-xl border border-[#dfe9d7] bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <TabButton active={activeTab === 'general'} onClick={() => setActiveTab('general')}>Geral</TabButton>
+          <TabButton active={activeTab === 'flash'} onClick={() => setActiveTab('flash')}>Estrutura Flash</TabButton>
+          <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')}>Usuários</TabButton>
         </div>
 
         {activeTab === 'general' && (
@@ -289,17 +303,37 @@ const Configuracoes = () => {
 
             <div className="mt-4 grid gap-5 xl:grid-cols-2">
               <section className={PANEL}>
-                <h2 className="text-xl font-semibold text-[#173c2c] dark:text-slate-100">Tolerâncias (em minutos)</h2>
-                <div className="mt-6 space-y-4">
-                  {STATUSES.map((status) => (
-                    <div key={status} className="grid grid-cols-[1fr_120px_24px] items-center gap-3">
-                      <label htmlFor={`tol-${status}`} className="text-sm font-medium text-slate-700 dark:text-slate-300">{STATUS_LABELS[status]}</label>
-                      <input id={`tol-${status}`} type="number" min="0" max="60" value={settings.tolerances[status]} onChange={(event) => updateTolerance(status, event.target.value)} className={FIELD} />
-                      <span title={status === TimeRecordStatus.ADJUSTED ? 'O status Ajustado vem sinalizado pela origem; o valor é mantido como configuração de referência.' : 'Limite em minutos usado na classificação.'}>
-                        <Info className="h-4 w-4 text-[#6b8a74] dark:text-slate-500" />
-                      </span>
-                    </div>
-                  ))}
+                <h2 className="text-xl font-semibold text-[#173c2c] dark:text-slate-100">Tolerâncias por status</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">Cada status possui sua própria tolerância antes e depois do horário previsto.</p>
+
+                <div className="mt-6 overflow-hidden rounded-xl border border-[#e2ecdc] dark:border-slate-800">
+                  <div className="grid grid-cols-[minmax(0,1fr)_110px_110px] gap-3 bg-[#f5faf1] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[#5a7564] dark:bg-slate-950 dark:text-slate-400">
+                    <span>Status</span>
+                    <span>Antes</span>
+                    <span>Depois</span>
+                  </div>
+                  <div className="divide-y divide-[#e8f0e3] dark:divide-slate-800">
+                    {STATUSES.map((status) => (
+                      <div key={status} className="grid grid-cols-[minmax(0,1fr)_110px_110px] items-center gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-300">{STATUS_LABELS[status]}</span>
+                          {status === TimeRecordStatus.ADJUSTED && <span className="mt-0.5 block text-[11px] text-slate-400">O ajuste sinalizado pela Flash tem prioridade.</span>}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input aria-label={`${STATUS_LABELS[status]} antes`} type="number" min="0" max="60" step="1" value={settings.statusTolerances?.[status]?.before ?? 0} onChange={(event) => updateTolerance(status, 'before', event.target.value)} className={`${FIELD} w-full px-2 text-center`} />
+                          <span className="text-xs text-slate-400">min</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input aria-label={`${STATUS_LABELS[status]} depois`} type="number" min="0" max="60" step="1" value={settings.statusTolerances?.[status]?.after ?? 0} onChange={(event) => updateTolerance(status, 'after', event.target.value)} className={`${FIELD} w-full px-2 text-center`} />
+                          <span className="text-xs text-slate-400">min</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl bg-[#effbe8] px-4 py-3 text-xs leading-5 text-[#456454] dark:bg-emerald-950/40 dark:text-emerald-200">
+                  Os segundos fazem parte do limite. Ex.: para 08:00, uma tolerância de 1 minuto depois inclui até 08:01:59; 08:02:00 já fica fora dessa janela.
                 </div>
               </section>
 
@@ -350,7 +384,7 @@ const Configuracoes = () => {
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                    <span className="rounded-full bg-white px-3 py-1.5 font-medium text-[#2f8f17] shadow-sm dark:bg-slate-900 dark:text-emerald-300">9 empresas</span>
+                    <span className="rounded-full bg-white px-3 py-1.5 font-medium text-[#2f8f17] shadow-sm dark:bg-slate-900 dark:text-emerald-300">{FLASH_COMPANY_CATALOG.length} empresas</span>
                     <span className="rounded-full bg-white px-3 py-1.5 text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-400">3 etapas por empresa</span>
                     <span className="rounded-full bg-white px-3 py-1.5 text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-400">Atualização seletiva após a carga inicial</span>
                   </div>
@@ -390,6 +424,8 @@ const Configuracoes = () => {
             </div>
           </div>
         )}
+
+        {activeTab === 'users' && <UsersSettings />}
       </Layout>
     </>
   );
